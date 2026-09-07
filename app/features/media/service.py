@@ -1,5 +1,3 @@
-# app/features/media/service.py
-
 from pathlib import Path
 from uuid import uuid4
 
@@ -11,56 +9,38 @@ from app.features.media.models import Media
 settings = get_settings()
 
 
-ALLOWED_MEDIA_TYPES = {
-    "video": {
-        "video/mp4",
-        "video/webm",
-        "video/quicktime",
-        "video/x-matroska",
-    },
-    "audio": {
-        "audio/mpeg",
-        "audio/wav",
-        "audio/x-wav",
-        "audio/ogg",
-        "audio/mp4",
-        "audio/aac",
-    },
-    "image": {
-        "image/jpeg",
-        "image/png",
-        "image/webp",
-        "image/gif",
-    },
-    "subtitle": {
-        "text/vtt",
-        "application/x-subrip",
-        "text/plain",
-    },
-}
-
-
-def detect_media_type(content_type: str | None) -> str:
-    if not content_type:
-        raise ValueError("Missing content type")
-
-    for media_type, mime_types in ALLOWED_MEDIA_TYPES.items():
-        if content_type in mime_types:
-            return media_type
-
-    raise ValueError(f"Unsupported media type: {content_type}")
-
-
 async def save_upload(file: UploadFile) -> Media:
-    media_type = detect_media_type(file.content_type)
+    if not file.filename:
+        raise ValueError("Filename is required")
 
-    upload_dir = Path(settings.upload_dir)
-    upload_dir.mkdir(parents=True, exist_ok=True)
+    extension = Path(file.filename).suffix.lower()
 
-    extension = Path(file.filename or "").suffix
+    allowed_extensions = {
+        ".mp4",
+        ".mov",
+        ".avi",
+        ".mkv",
+        ".webm",
+        ".mp3",
+        ".wav",
+        ".m4a",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".srt",
+        ".vtt",
+    }
+
+    if extension not in allowed_extensions:
+        raise ValueError(f"Unsupported file type: {extension}")
+
+    media_type = get_media_type(extension)
+
     stored_filename = f"{uuid4()}{extension}"
+    destination = Path(settings.upload_dir) / stored_filename
 
-    destination = upload_dir / stored_filename
+    destination.parent.mkdir(parents=True, exist_ok=True)
 
     file_size = 0
 
@@ -70,9 +50,32 @@ async def save_upload(file: UploadFile) -> Media:
             file_size += len(chunk)
 
     return Media(
-        original_filename=file.filename or "unknown",
+        original_filename=file.filename,
         stored_filename=stored_filename,
         media_type=media_type,
         mime_type=file.content_type or "application/octet-stream",
         file_size=file_size,
     )
+
+
+async def delete_media_file(stored_filename: str) -> None:
+    path = Path(settings.upload_dir) / stored_filename
+
+    if path.exists():
+        path.unlink()
+
+
+def get_media_type(extension: str) -> str:
+    if extension in {".mp4", ".mov", ".avi", ".mkv", ".webm"}:
+        return "video"
+
+    if extension in {".mp3", ".wav", ".m4a"}:
+        return "audio"
+
+    if extension in {".jpg", ".jpeg", ".png", ".webp"}:
+        return "image"
+
+    if extension in {".srt", ".vtt"}:
+        return "subtitle"
+
+    raise ValueError("Unsupported media type")
