@@ -7,7 +7,10 @@ authors = [
     { name = "Faizan", email = "fai1ggj@gmail.com" }
 ]
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "fastapi>=0.141.1",
+    "uvicorn[standard]>=0.52.4",
+]
 
 [project.scripts]
 frameflux-backend = "frameflux_backend:main"
