@@ -5,13 +5,16 @@ from sqlalchemy import engine_from_config, pool
 
 from app.core.config import get_settings
 from app.features.auth.models import User
+from app.features.media.models import Media
 from app.infrastructure.database import Base
-
 
 config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+# Import models so Alembic registers them with SQLAlchemy metadata.
+_ = (User, Media)
 
 target_metadata = Base.metadata
 
@@ -33,7 +36,8 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     settings = get_settings()
 
-    configuration = config.get_section(config.config_ini_section)
+    configuration = config.get_section(config.config_ini_section) or {}
+
     configuration["sqlalchemy.url"] = settings.database_url.replace(
         "+asyncpg",
         "+psycopg",
