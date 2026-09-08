@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict,Field
 
 
 class MediaResponse(BaseModel):
@@ -28,3 +28,27 @@ class MediaResponse(BaseModel):
     fps: str | None = None
 
     created_at: datetime
+
+class MediaConvertRequest(BaseModel):
+    format: str = "mp4"
+
+    resolution: str | None = None
+    custom_width: int | None = Field(default=None, ge=16)
+    custom_height: int | None = Field(default=None, ge=16)
+
+    fps: float | None = Field(default=None, gt=0, le=240)
+
+    video_codec: str | None = None
+
+    quality: int | None = Field(default=None, ge=0, le=51)
+
+    bitrate: str | None = None
+
+    aspect_ratio: str | None = None
+
+
+
+class MediaEditRequest(BaseModel):
+    operation: str
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
