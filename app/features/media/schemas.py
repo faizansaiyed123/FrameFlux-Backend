@@ -62,9 +62,13 @@ class MediaTransformRequest(BaseModel):
     speed: float | None = Field(default=None, gt=0)
 
 
-class MediaFreezeRequest(BaseModel):
+class MediaFreezeFrameRequest(BaseModel):
     timestamp: float = Field(ge=0)
-    duration: float = Field(gt=0)
+    duration: float = Field(default=1.0, gt=0)
+
+
+# Backward compatibility alias
+MediaFreezeRequest = MediaFreezeFrameRequest
 
 
 class MediaOverlayRequest(BaseModel):
@@ -80,51 +84,27 @@ class MediaOverlayRequest(BaseModel):
     opacity: float = Field(default=1.0, ge=0, le=1)
 
 
-
 class MediaMergeRequest(BaseModel):
     media_ids: list[str]
 
 
-class MediaTransformRequest(BaseModel):
-    operation: str
-
-    width: int | None = None
-    height: int | None = None
-
-    angle: int | None = None
-
-    speed: float | None = None
-
-
-class MediaFreezeFrameRequest(BaseModel):
-    timestamp: float
-    duration: float = 1.0
-
-
-class MediaOverlayRequest(BaseModel):
-    operation: str
-
-    text: str | None = None
-    image_filename: str | None = None
-
-    x: int = 10
-    y: int = 10
-
-    font_size: int = 24
-    opacity: float = 1.0
 
 # Resumable upload schemas
+
 
 class ResumableInitRequest(BaseModel):
     original_filename: str
     total_size: int
     chunk_size: int | None = None
 
+
 class ResumableInitResponse(BaseModel):
     upload_id: str
 
+
 class ChunkUploadResponse(BaseModel):
     detail: str = "Chunk stored"
+
 
 class ActionResponse(BaseModel):
     detail: str

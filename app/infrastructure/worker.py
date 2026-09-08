@@ -2,6 +2,7 @@
 from arq import create_pool
 from arq.connections import RedisSettings
 
+from app.core.config import get_settings
 from app.infrastructure.tasks import (
     process_media_task,
     convert_media_task,
@@ -11,6 +12,8 @@ from app.infrastructure.tasks import (
     freeze_frame_task,
     overlay_media_task,
 )
+
+settings = get_settings()
 
 
 class WorkerSettings:
@@ -24,11 +27,7 @@ class WorkerSettings:
         overlay_media_task,
     ]
 
-    redis_settings = RedisSettings(
-        host="localhost",
-        port=6379,
-        database=0,
-    )
+    redis_settings = RedisSettings.from_dsn(settings.redis_url)
 
 
 async def create_worker_pool():

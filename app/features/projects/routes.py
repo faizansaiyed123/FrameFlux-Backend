@@ -18,22 +18,13 @@ from app.features.projects.service import (
     update_project,
 )
 from app.infrastructure.database import get_db
-from arq import create_pool
-from arq.connections import RedisSettings
-from app.core.config import get_settings
-from arq import create_pool
-from arq.connections import RedisSettings
-from sqlalchemy import select
-
-from app.features.media.models import Media
+from app.infrastructure.worker import create_worker_pool
 
 
 router = APIRouter(
     prefix="/projects",
     tags=["Projects"],
 )
-
-settings = get_settings()
 
 @router.post(
     "",
@@ -164,13 +155,7 @@ async def process_project(
             detail="No media found in project",
         )
 
-    redis = await create_pool(
-        RedisSettings(
-            host="localhost",
-            port=6379,
-            database=0,
-        )
-    )
+    redis = await create_worker_pool()
 
     jobs = []
 
@@ -195,7 +180,7 @@ async def process_project(
         await db.commit()
 
     finally:
-        await redis.aclose()
+        await redis.close()
 
     return {
         "project_id": str(project_id),
@@ -203,69 +188,6 @@ async def process_project(
         "jobs": jobs,
     }
 
-@router.post("/{project_id}/process")
-async def process_project(
-    project_id: UUID,
-    db: AsyncSession = Depends(get_db),
-):
-    project = await get_project(db, project_id)
-
-    if project is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Project not found",
-        )
-
-    result = await db.execute(
-        select(Media).where(Media.project_id == project_id)
-    )
-
-    media_list = result.scalars().all()
-
-    if not media_list:
-        raise HTTPException(
-            status_code=404,
-            detail="No media found in project",
-        )
-
-    redis = await create_pool(
-        RedisSettings(
-            host="localhost",
-            port=6379,
-            database=0,
-        )
-    )
-
-    jobs = []
-
-    try:
-        for media in media_list:
-            media.processing_status = "queued"
-            media.processing_error = None
-
-            job = await redis.enqueue_job(
-                "process_media_task",
-                str(media.id),
-                media.stored_filename,
-            )
-
-            jobs.append(
-                {
-                    "media_id": str(media.id),
-                    "job_id": job.job_id,
-                }
-            )
-
-        await db.commit()
-
-    finally:
-        await redis.aclose()
-
-    return {
-        "project_id": str(project_id),
-        "status": "queued",
-        "jobs": jobs,
-    }
 
 @router.get("/{project_id}/status")
 async def project_processing_status(

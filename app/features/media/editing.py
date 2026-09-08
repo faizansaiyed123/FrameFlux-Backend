@@ -146,6 +146,20 @@ def freeze_frame(
     _run(output)
 
 
+def _get_system_font() -> str | None:
+    candidate_fonts = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+        r"C:\Windows\Fonts\arial.ttf",
+    ]
+    for font in candidate_fonts:
+        if Path(font).exists():
+            return font
+    return None
+
+
 def add_text_overlay(
     input_path: str,
     output_path: str,
@@ -163,27 +177,28 @@ def add_text_overlay(
     if font_size <= 0:
         raise ValueError("Font size must be greater than 0")
 
-    font_path = r"C:\Windows\Fonts\arial.ttf"
+    font_path = _get_system_font()
 
-    if not Path(font_path).exists():
-        raise FileNotFoundError(
-            f"Windows font not found: {font_path}"
-        )
+    drawtext_kwargs = {
+        "text": text,
+        "x": x,
+        "y": y,
+        "fontsize": font_size,
+        "fontcolor": "white",
+        "box": 1,
+        "boxcolor": "black@0.65",
+        "boxborderw": 12,
+    }
+    if font_path:
+        drawtext_kwargs["fontfile"] = font_path
 
     stream = ffmpeg.input(input_path)
 
     video = stream.video.filter(
         "drawtext",
-        fontfile=font_path,
-        text=text,
-        x=x,
-        y=y,
-        fontsize=font_size,
-        fontcolor="white",
-        box=1,
-        boxcolor="black@0.65",
-        boxborderw=12,
+        **drawtext_kwargs,
     )
+
 
     output = ffmpeg.output(
         video,

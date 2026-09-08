@@ -11,6 +11,7 @@ from arq.connections import RedisSettings
 from app.core.config import get_settings
 from app.features.media.models import Media
 from app.features.media.service import get_media_type
+from app.infrastructure.worker import WorkerSettings
 
 settings = get_settings()
 
@@ -53,7 +54,7 @@ class ResumableUploadService:
         # Ensure temp directory exists
         _temp_dir(upload_id).mkdir(parents=True, exist_ok=True)
 
-        redis = await create_pool(RedisSettings(host="localhost", port=6379, database=0))
+        redis = await create_pool(WorkerSettings.redis_settings)
         await redis.hset(
             _redis_key(upload_id),
             mapping={
@@ -65,14 +66,14 @@ class ResumableUploadService:
                 "status": "in_progress",
             },
         )
-        await redis.aclose()
+        await redis.close()
         return upload_id
 
     @staticmethod
     async def _load_meta(upload_id: UUID) -> dict:
-        redis = await create_pool(RedisSettings(host="localhost", port=6379, database=0))
+        redis = await create_pool(WorkerSettings.redis_settings)
         meta = await redis.hgetall(_redis_key(upload_id))
-        await redis.aclose()
+        await redis.close()
         if not meta:
             raise ValueError("Upload ID not found")
         # Decode bytes to str (arq returns bytes)
@@ -99,21 +100,21 @@ class ResumableUploadService:
         indices = set(int(i) for i in existing.split(",") if i)  # handle empty string
         indices.add(index)
         new_value = ",".join(str(i) for i in sorted(indices))
-        redis = await create_pool(RedisSettings(host="localhost", port=6379, database=0))
+        redis = await create_pool(WorkerSettings.redis_settings)
         await redis.hset(_redis_key(upload_id), mapping={"uploaded_chunks": new_value})
-        await redis.aclose()
+        await redis.close()
 
     @staticmethod
     async def pause(upload_id: UUID) -> None:
-        redis = await create_pool(RedisSettings(host="localhost", port=6379, database=0))
+        redis = await create_pool(WorkerSettings.redis_settings)
         await redis.hset(_redis_key(upload_id), mapping={"status": "paused"})
-        await redis.aclose()
+        await redis.close()
 
     @staticmethod
     async def resume(upload_id: UUID) -> None:
-        redis = await create_pool(RedisSettings(host="localhost", port=6379, database=0))
+        redis = await create_pool(WorkerSettings.redis_settings)
         await redis.hset(_redis_key(upload_id), mapping={"status": "in_progress"})
-        await redis.aclose()
+        await redis.close()
 
     @staticmethod
     async def cancel(upload_id: UUID) -> None:
@@ -122,9 +123,10 @@ class ResumableUploadService:
         if temp_dir.exists():
             shutil.rmtree(temp_dir)
         # Delete Redis record
-        redis = await create_pool(RedisSettings(host="localhost", port=6379, database=0))
+        redis = await create_pool(WorkerSettings.redis_settings)
         await redis.delete(_redis_key(upload_id))
-        await redis.aclose()
+        await redis.close()
+
 
     @staticmethod
     async def finalize(upload_id: UUID, db_session) -> Media:
