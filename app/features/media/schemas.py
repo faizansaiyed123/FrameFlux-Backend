@@ -112,3 +112,19 @@ class MediaOverlayRequest(BaseModel):
 
     font_size: int = 24
     opacity: float = 1.0
+
+# Resumable upload schemas
+
+class ResumableInitRequest(BaseModel):
+    original_filename: str
+    total_size: int
+    chunk_size: int | None = None
+
+class ResumableInitResponse(BaseModel):
+    upload_id: str
+
+class ChunkUploadResponse(BaseModel):
+    detail: str = "Chunk stored"
+
+class ActionResponse(BaseModel):
+    detail: str
