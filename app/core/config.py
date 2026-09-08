@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     max_upload_size_bytes: int = 500 * 1024 * 1024  # 500 MB
     max_chunk_size_bytes: int = 50 * 1024 * 1024   # 50 MB
 
+    # Auth / JWT settings
+    jwt_secret_key: str = "dev-secret-change-in-production"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 60
+    password_reset_expire_minutes: int = 15
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
