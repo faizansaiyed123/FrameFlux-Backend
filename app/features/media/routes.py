@@ -20,6 +20,14 @@ from app.infrastructure.database import get_db
 from app.features.media.processor import get_uploaded_file
 from app.infrastructure.worker import create_worker_pool
 
+from app.features.media.resumable_service import ResumableUploadService
+from app.features.media.schemas import (
+    ResumableInitRequest,
+    ResumableInitResponse,
+    ChunkUploadResponse,
+    ActionResponse,
+)
+
 
 router = APIRouter(
     prefix="/media",
@@ -103,6 +111,83 @@ async def upload_media(
             detail=str(exc),
         )
 
+
+# ---------------------------------------------------------
+
+# ---------------------------------------------------------
+# RESUMABLE UPLOAD
+# ---------------------------------------------------------
+
+@router.post("/resumable/init", response_model=ResumableInitResponse)
+async def resumable_init(data: ResumableInitRequest):
+    """Initialize a resumable upload and return an upload_id."""
+    upload_id = await ResumableUploadService.init_upload(
+        original_filename=data.original_filename,
+        total_size=data.total_size,
+        chunk_size=data.chunk_size,
+    )
+    return ResumableInitResponse(upload_id=str(upload_id))
+
+@router.post("/resumable/{upload_id}/chunk/{index}", response_model=ChunkUploadResponse)
+async def resumable_chunk(
+    upload_id: UUID,
+    index: int,
+    file: UploadFile = File(...),
+):
+    """Upload a single chunk for the given upload_id."""
+    content = await file.read()
+    try:
+        await ResumableUploadService.store_chunk(upload_id, index, content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return ChunkUploadResponse()
+
+@router.post("/resumable/{upload_id}/pause", response_model=ActionResponse)
+async def resumable_pause(upload_id: UUID):
+    try:
+        await ResumableUploadService.pause(upload_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return ActionResponse(detail="paused")
+
+@router.post("/resumable/{upload_id}/resume", response_model=ActionResponse)
+async def resumable_resume(upload_id: UUID):
+    try:
+        await ResumableUploadService.resume(upload_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return ActionResponse(detail="resumed")
+
+@router.post("/resumable/{upload_id}/retry", response_model=ChunkUploadResponse)
+async def resumable_retry(
+    upload_id: UUID,
+    index: int,
+    file: UploadFile = File(...),
+) -> ChunkUploadResponse:
+    """Retry uploading a single chunk for the given upload_id."""
+    content = await file.read()
+    try:
+        await ResumableUploadService.store_chunk(upload_id, index, content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return ChunkUploadResponse()
+
+@router.delete("/resumable/{upload_id}", response_model=ActionResponse)
+async def resumable_cancel(upload_id: UUID):
+    try:
+        await ResumableUploadService.cancel(upload_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return ActionResponse(detail="canceled")
+
+@router.post("/resumable/{upload_id}/finalize", response_model=MediaResponse)
+async def resumable_finalize(upload_id: UUID, db: AsyncSession = Depends(get_db)):
+    """Assemble chunks and create a Media record."""
+    try:
+        media = await ResumableUploadService.finalize(upload_id, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return media
 
 # ---------------------------------------------------------
 # LIST MEDIA
