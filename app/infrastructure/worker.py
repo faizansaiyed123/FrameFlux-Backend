@@ -17,6 +17,22 @@ from app.infrastructure.tasks import (
 settings = get_settings()
 
 
+async def on_startup(ctx):
+    try:
+        ctx["redis"] = await create_worker_pool()
+    except Exception:
+        pass
+
+
+async def on_shutdown(ctx):
+    redis = ctx.get("redis")
+    if redis:
+        try:
+            await redis.close()
+        except Exception:
+            pass
+
+
 class WorkerSettings:
     functions = [
         process_media_task,
@@ -31,6 +47,8 @@ class WorkerSettings:
     ]
 
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
+    on_startup = on_startup
+    on_shutdown = on_shutdown
 
 
 async def create_worker_pool():

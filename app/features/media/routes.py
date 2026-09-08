@@ -16,6 +16,13 @@ from app.features.media.schemas import (
     MediaResponse,
     MediaSplitRequest,
     MediaClipsRequest,
+    MediaProcessingStatusResponse,
+)
+from app.features.jobs.schemas import JobStatusResponse
+from app.features.jobs.service import (
+    get_job_status,
+    get_media_progress,
+    set_processing_progress,
 )
 from app.features.media.service import delete_media_file, save_upload
 from app.infrastructure.database import get_db
@@ -67,10 +74,22 @@ async def enqueue_media_job(
     pool = await create_worker_pool()
 
     try:
-        return await pool.enqueue_job(
+        job = await pool.enqueue_job(
             task_name,
             *args,
         )
+        if job and args:
+            media_id = str(args[0])
+            await set_processing_progress(
+                media_id=media_id,
+                status="queued",
+                progress=0,
+                job_id=job.job_id,
+                stage="Queued for processing",
+                task_name=task_name,
+                redis=pool,
+            )
+        return job
     finally:
         await pool.close()
 
@@ -222,6 +241,53 @@ async def get_media(
     db: AsyncSession = Depends(get_db),
 ):
     return await get_media_or_404(media_id, db)
+
+
+# ---------------------------------------------------------
+# PROCESSING STATUS / PROGRESS & JOB MONITORING
+# ---------------------------------------------------------
+
+@router.get(
+    "/{media_id}/status",
+    response_model=MediaProcessingStatusResponse,
+    summary="Get media processing status and progress",
+)
+async def get_media_status_endpoint(
+    media_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    media = await get_media_or_404(media_id, db)
+    return await get_media_progress(media_id, db_media=media)
+
+
+@router.get(
+    "/{media_id}/progress",
+    response_model=MediaProcessingStatusResponse,
+    summary="Get media processing progress",
+)
+async def get_media_progress_endpoint(
+    media_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    media = await get_media_or_404(media_id, db)
+    return await get_media_progress(media_id, db_media=media)
+
+
+@router.get(
+    "/jobs/{job_id}",
+    response_model=JobStatusResponse,
+    summary="Get background job status and progress by job ID",
+)
+async def get_media_job_endpoint(
+    job_id: str,
+):
+    job_data = await get_job_status(job_id)
+    if not job_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job '{job_id}' not found",
+        )
+    return job_data
 
 
 # ---------------------------------------------------------

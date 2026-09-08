@@ -20,6 +20,35 @@ from app.features.media.editing import (
 )
 
 
+from app.features.jobs.service import set_processing_progress
+
+
+async def _update_progress(
+    ctx,
+    media_id: str,
+    status: str,
+    progress: int,
+    stage: str | None = None,
+    error: str | None = None,
+    task_name: str | None = None,
+):
+    try:
+        job_id = ctx.get("job_id") if isinstance(ctx, dict) else None
+        redis = ctx.get("redis") if isinstance(ctx, dict) else None
+        await set_processing_progress(
+            media_id=media_id,
+            status=status,
+            progress=progress,
+            job_id=job_id,
+            stage=stage,
+            error=error,
+            task_name=task_name,
+            redis=redis,
+        )
+    except Exception:
+        pass
+
+
 async def process_media_task(
     ctx,
     media_id: str,
@@ -43,6 +72,7 @@ async def process_media_task(
             media.processing_status = "processing"
             media.processing_error = None
             await db.commit()
+            await _update_progress(ctx, media_id, "processing", 15, stage="Initializing media processing", task_name="process_media_task")
 
             output_filename = process_media(
                 media.id,
@@ -83,6 +113,7 @@ async def process_media_task(
             media.processing_error = None
 
             await db.commit()
+            await _update_progress(ctx, media_id, "completed", 100, stage="Processing completed", task_name="process_media_task")
 
             return {
                 "media_id": media_id,
@@ -105,6 +136,7 @@ async def process_media_task(
             media.processing_error = str(exc)[:500]
 
             await db.commit()
+            await _update_progress(ctx, media_id, "failed", 0, stage="Processing failed", error=str(exc)[:500], task_name="process_media_task")
 
             return {
                 "media_id": media_id,
@@ -138,6 +170,7 @@ async def convert_media_task(
             media.processing_status = "processing"
             media.processing_error = None
             await db.commit()
+            await _update_progress(ctx, media_id, "processing", 15, stage="Initializing conversion", task_name="convert_media_task")
 
             input_path = get_uploaded_file(stored_filename)
             output_path = get_uploaded_file(output_filename)
@@ -153,6 +186,7 @@ async def convert_media_task(
             media.processing_error = None
 
             await db.commit()
+            await _update_progress(ctx, media_id, "completed", 100, stage="Conversion completed", task_name="convert_media_task")
 
             return {
                 "media_id": media_id,
@@ -167,6 +201,7 @@ async def convert_media_task(
             media.processing_error = str(exc)[:500]
 
             await db.commit()
+            await _update_progress(ctx, media_id, "failed", 0, stage="Conversion failed", error=str(exc)[:500], task_name="convert_media_task")
 
             return {
                 "media_id": media_id,
@@ -206,6 +241,7 @@ async def edit_media_task(
             media.processing_status = "processing"
             media.processing_error = None
             await db.commit()
+            await _update_progress(ctx, media_id, "processing", 15, stage="Initializing edit", task_name="edit_media_task")
 
             input_path = get_uploaded_file(stored_filename)
             output_path = get_uploaded_file(output_filename)
@@ -241,6 +277,7 @@ async def edit_media_task(
             media.processing_error = None
 
             await db.commit()
+            await _update_progress(ctx, media_id, "completed", 100, stage="Edit completed", task_name="edit_media_task")
 
             return {
                 "media_id": media_id,
@@ -255,6 +292,7 @@ async def edit_media_task(
             media.processing_status = "failed"
             media.processing_error = str(exc)[:500]
             await db.commit()
+            await _update_progress(ctx, media_id, "failed", 0, stage="Edit failed", error=str(exc)[:500], task_name="edit_media_task")
 
             return {
                 "media_id": media_id,
@@ -301,6 +339,7 @@ async def merge_media_task(
             media.processing_error = None
 
             await db.commit()
+            await _update_progress(ctx, media_id, "completed", 100, stage="Merge completed", task_name="merge_media_task")
 
             return {
                 "media_id": media_id,
@@ -320,6 +359,7 @@ async def merge_media_task(
                 media.processing_status = "failed"
                 media.processing_error = str(exc)[:500]
                 await db.commit()
+            await _update_progress(ctx, media_id, "failed", 0, stage="Merge failed", error=str(exc)[:500], task_name="merge_media_task")
 
             return {
                 "media_id": media_id,
@@ -353,6 +393,7 @@ async def transform_media_task(
             media.processing_status = "processing"
             media.processing_error = None
             await db.commit()
+            await _update_progress(ctx, media_id, "processing", 15, stage="Initializing transformation", task_name="transform_media_task")
 
             input_path = get_uploaded_file(
                 stored_filename
@@ -372,6 +413,7 @@ async def transform_media_task(
             media.processing_error = None
 
             await db.commit()
+            await _update_progress(ctx, media_id, "completed", 100, stage="Transformation completed", task_name="transform_media_task")
 
             return {
                 "media_id": media_id,
@@ -395,6 +437,7 @@ async def transform_media_task(
                 media.processing_status = "failed"
                 media.processing_error = str(exc)[:500]
                 await db.commit()
+            await _update_progress(ctx, media_id, "failed", 0, stage="Transformation failed", error=str(exc)[:500], task_name="transform_media_task")
 
             return {
                 "media_id": media_id,
@@ -429,6 +472,7 @@ async def freeze_frame_task(
 
             media.processing_status = "processing"
             await db.commit()
+            await _update_progress(ctx, media_id, "processing", 15, stage="Initializing freeze frame", task_name="freeze_frame_task")
 
             input_path = get_uploaded_file(
                 stored_filename
@@ -449,6 +493,7 @@ async def freeze_frame_task(
             media.processing_error = None
 
             await db.commit()
+            await _update_progress(ctx, media_id, "completed", 100, stage="Freeze frame completed", task_name="freeze_frame_task")
 
             return {
                 "media_id": media_id,
@@ -472,6 +517,7 @@ async def freeze_frame_task(
                 media.processing_status = "failed"
                 media.processing_error = str(exc)[:500]
                 await db.commit()
+            await _update_progress(ctx, media_id, "failed", 0, stage="Freeze frame failed", error=str(exc)[:500], task_name="freeze_frame_task")
 
             return {
                 "media_id": media_id,
@@ -505,6 +551,7 @@ async def overlay_media_task(
 
             media.processing_status = "processing"
             await db.commit()
+            await _update_progress(ctx, media_id, "processing", 15, stage="Initializing overlay", task_name="overlay_media_task")
 
             input_path = get_uploaded_file(
                 stored_filename
@@ -573,6 +620,7 @@ async def overlay_media_task(
             media.processing_error = None
 
             await db.commit()
+            await _update_progress(ctx, media_id, "completed", 100, stage="Overlay completed", task_name="overlay_media_task")
 
             return {
                 "media_id": media_id,
@@ -596,6 +644,7 @@ async def overlay_media_task(
                 media.processing_status = "failed"
                 media.processing_error = str(exc)[:500]
                 await db.commit()
+            await _update_progress(ctx, media_id, "failed", 0, stage="Overlay failed", error=str(exc)[:500], task_name="overlay_media_task")
 
             return {
                 "media_id": media_id,
@@ -629,6 +678,7 @@ async def split_media_task(
             media.processing_status = "processing"
             media.processing_error = None
             await db.commit()
+            await _update_progress(ctx, media_id, "processing", 15, stage="Initializing split", task_name="split_media_task")
 
             input_path = get_uploaded_file(stored_filename)
             info = get_video_info(str(input_path))
@@ -650,6 +700,7 @@ async def split_media_task(
             media.processing_status = "completed"
             media.processing_error = None
             await db.commit()
+            await _update_progress(ctx, media_id, "completed", 100, stage="Split completed", task_name="split_media_task")
 
             return {
                 "media_id": media_id,
@@ -663,6 +714,7 @@ async def split_media_task(
             media.processing_status = "failed"
             media.processing_error = str(exc)[:500]
             await db.commit()
+            await _update_progress(ctx, media_id, "failed", 0, stage="Split failed", error=str(exc)[:500], task_name="split_media_task")
             return {
                 "media_id": media_id,
                 "status": "failed",
@@ -699,6 +751,7 @@ async def clips_media_task(
             media.processing_status = "processing"
             media.processing_error = None
             await db.commit()
+            await _update_progress(ctx, media_id, "processing", 15, stage="Initializing clips operation", task_name="clips_media_task")
 
             input_path = get_uploaded_file(stored_filename)
             output_path = get_uploaded_file(output_filename)
@@ -724,6 +777,7 @@ async def clips_media_task(
             media.processing_status = "completed"
             media.processing_error = None
             await db.commit()
+            await _update_progress(ctx, media_id, "completed", 100, stage="Clips operation completed", task_name="clips_media_task")
 
             return {
                 "media_id": media_id,
@@ -737,6 +791,7 @@ async def clips_media_task(
             media.processing_status = "failed"
             media.processing_error = str(exc)[:500]
             await db.commit()
+            await _update_progress(ctx, media_id, "failed", 0, stage="Clips operation failed", error=str(exc)[:500], task_name="clips_media_task")
             return {
                 "media_id": media_id,
                 "status": "failed",

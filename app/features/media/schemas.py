@@ -134,3 +134,13 @@ class ChunkUploadResponse(BaseModel):
 
 class ActionResponse(BaseModel):
     detail: str
+
+
+class MediaProcessingStatusResponse(BaseModel):
+    media_id: str
+    status: str = Field(description="pending, queued, processing, completed, or failed")
+    progress: int = Field(default=0, ge=0, le=100, description="Processing progress from 0 to 100")
+    stage: str | None = Field(default=None, description="Human-readable stage description")
+    job_id: str | None = Field(default=None, description="Latest background job ID")
+    processed_filename: str | None = None
+    error: str | None = None
