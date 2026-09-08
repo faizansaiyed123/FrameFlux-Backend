@@ -126,6 +126,8 @@ async def upload_media(
 
         return media
 
+    except HTTPException:
+        raise
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -142,12 +144,17 @@ async def upload_media(
 @router.post("/resumable/init", response_model=ResumableInitResponse)
 async def resumable_init(data: ResumableInitRequest):
     """Initialize a resumable upload and return an upload_id."""
-    upload_id = await ResumableUploadService.init_upload(
-        original_filename=data.original_filename,
-        total_size=data.total_size,
-        chunk_size=data.chunk_size,
-    )
-    return ResumableInitResponse(upload_id=str(upload_id))
+    try:
+        upload_id = await ResumableUploadService.init_upload(
+            original_filename=data.original_filename,
+            total_size=data.total_size,
+            chunk_size=data.chunk_size,
+        )
+        return ResumableInitResponse(upload_id=str(upload_id))
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 @router.post("/resumable/{upload_id}/chunk/{index}", response_model=ChunkUploadResponse)
 async def resumable_chunk(
@@ -156,11 +163,15 @@ async def resumable_chunk(
     file: UploadFile = File(...),
 ):
     """Upload a single chunk for the given upload_id."""
+    if index < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chunk index must be non-negative")
     content = await file.read()
     try:
         await ResumableUploadService.store_chunk(upload_id, index, content)
+    except HTTPException:
+        raise
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     return ChunkUploadResponse()
 
 @router.post("/resumable/{upload_id}/pause", response_model=ActionResponse)
@@ -186,11 +197,15 @@ async def resumable_retry(
     file: UploadFile = File(...),
 ) -> ChunkUploadResponse:
     """Retry uploading a single chunk for the given upload_id."""
+    if index < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chunk index must be non-negative")
     content = await file.read()
     try:
         await ResumableUploadService.store_chunk(upload_id, index, content)
+    except HTTPException:
+        raise
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     return ChunkUploadResponse()
 
 @router.delete("/resumable/{upload_id}", response_model=ActionResponse)
@@ -206,8 +221,10 @@ async def resumable_finalize(upload_id: UUID, db: AsyncSession = Depends(get_db)
     """Assemble chunks and create a Media record."""
     try:
         media = await ResumableUploadService.finalize(upload_id, db)
+    except HTTPException:
+        raise
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     return media
 
 # ---------------------------------------------------------

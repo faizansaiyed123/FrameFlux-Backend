@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     ffmpeg_binary: str = "ffmpeg"
     ffprobe_binary: str = "ffprobe"
 
+    # Configurable file-size limits
+    max_upload_size_bytes: int = 500 * 1024 * 1024  # 500 MB
+    max_chunk_size_bytes: int = 50 * 1024 * 1024   # 50 MB
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

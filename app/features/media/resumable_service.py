@@ -12,6 +12,12 @@ from app.core.config import get_settings
 from app.features.media.models import Media
 from app.features.media.service import get_media_type
 from app.infrastructure.worker import WorkerSettings
+from app.shared.validators import (
+    validate_file_content,
+    validate_file_size,
+    validate_filename_and_extension,
+    validate_mime_type,
+)
 
 settings = get_settings()
 
@@ -46,8 +52,24 @@ class ResumableUploadService:
         Returns the generated ``upload_id`` which the client must include in
         subsequent chunk, pause/resume, cancel, and finalize calls.
         """
+        # Validate filename and extension
+        ext = validate_filename_and_extension(original_filename)
+
+        # Validate total size against configured limit
+        validate_file_size(total_size, settings.max_upload_size_bytes)
+
+        # Validate chunk size
+        if chunk_size is not None:
+            if chunk_size <= 0:
+                raise ValueError("chunk_size must be greater than 0")
+            if chunk_size > settings.max_chunk_size_bytes:
+                from fastapi import HTTPException, status
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=f"chunk_size {chunk_size} exceeds maximum chunk limit of {settings.max_chunk_size_bytes} bytes",
+                )
+
         upload_id = uuid4()
-        ext = Path(original_filename).suffix.lower()
         stored_filename = f"{uuid4()}{ext}"
         chunk_size = chunk_size or (1024 * 1024)  # default 1 MiB
 
@@ -146,6 +168,18 @@ class ResumableUploadService:
                 f"Missing chunks: expected {expected_chunks}, received {len(uploaded)}"
             )
 
+        # Validate size and extension before assembling
+        original_filename = meta["original_filename"]
+        ext = validate_filename_and_extension(original_filename)
+        validate_file_size(total_size, settings.max_upload_size_bytes)
+
+        # Inspect initial chunk content for security / signature check
+        first_chunk = _chunk_path(upload_id, 0)
+        if first_chunk.exists():
+            with open(first_chunk, "rb") as f0:
+                header_data = f0.read(512)
+                validate_file_content(header_data, ext)
+
         # Assemble chunks in order
         final_path = Path(settings.upload_dir) / meta["stored_filename"]
         final_path.parent.mkdir(parents=True, exist_ok=True)
@@ -161,11 +195,9 @@ class ResumableUploadService:
         await ResumableUploadService.cancel(upload_id)
 
         # Create Media ORM object and persist
-        original_filename = meta["original_filename"]
         stored_filename = meta["stored_filename"]
-        ext = Path(original_filename).suffix.lower()
         media_type = get_media_type(ext)
-        mime_type = "application/octet-stream"  # fallback – client can provide if needed
+        mime_type = validate_mime_type(None, ext)
         media = Media(
             original_filename=original_filename,
             stored_filename=stored_filename,

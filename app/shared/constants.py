@@ -1,0 +1,116 @@
+"""Shared constants across the FrameFlux backend."""
+
+# Configurable defaults (bytes)
+DEFAULT_MAX_UPLOAD_SIZE_BYTES = 500 * 1024 * 1024  # 500 MB
+DEFAULT_MAX_CHUNK_SIZE_BYTES = 50 * 1024 * 1024   # 50 MB
+
+ALLOWED_EXTENSIONS = {
+    ".mp4",
+    ".mov",
+    ".avi",
+    ".mkv",
+    ".webm",
+    ".mp3",
+    ".wav",
+    ".m4a",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".srt",
+    ".vtt",
+}
+
+VIDEO_EXTENSIONS = {
+    ".mp4",
+    ".mov",
+    ".avi",
+    ".mkv",
+    ".webm",
+}
+
+AUDIO_EXTENSIONS = {
+    ".mp3",
+    ".wav",
+    ".m4a",
+}
+
+IMAGE_EXTENSIONS = {
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+}
+
+SUBTITLE_EXTENSIONS = {
+    ".srt",
+    ".vtt",
+}
+
+# Mapping extensions to standard MIME types
+EXTENSION_TO_MIME = {
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".avi": "video/x-msvideo",
+    ".mkv": "video/x-matroska",
+    ".webm": "video/webm",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".srt": "text/plain",
+    ".vtt": "text/vtt",
+}
+
+# Recognized media MIME types
+ALLOWED_MIME_TYPES = {
+    "video/mp4",
+    "video/quicktime",
+    "video/x-msvideo",
+    "video/x-matroska",
+    "video/webm",
+    "video/avi",
+    "video/msvideo",
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/wav",
+    "audio/wave",
+    "audio/x-wav",
+    "audio/x-pn-wav",
+    "audio/mp4",
+    "audio/m4a",
+    "audio/x-m4a",
+    "audio/aac",
+    "audio/ogg",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "text/plain",
+    "text/vtt",
+    "application/x-subrip",
+    "text/x-subrip",
+    "text/srt",
+    "application/octet-stream",
+}
+
+# Explicitly disallowed / dangerous MIME types
+DISALLOWED_MIME_PREFIXES = (
+    "application/x-dosexec",
+    "application/x-executable",
+    "application/x-msdownload",
+    "application/x-sh",
+    "application/x-bat",
+    "application/x-csh",
+    "application/x-python",
+    "text/html",
+    "text/javascript",
+    "application/javascript",
+    "application/json",
+    "application/xml",
+    "application/zip",
+    "application/x-tar",
+    "application/gzip",
+)
