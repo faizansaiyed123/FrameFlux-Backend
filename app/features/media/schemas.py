@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict,Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class MediaResponse(BaseModel):
@@ -14,11 +14,11 @@ class MediaResponse(BaseModel):
     mime_type: str
     file_size: int
 
-    project_id: UUID | None = None
+    project_id: UUID | None
 
     processing_status: str
-    processed_filename: str | None = None
-    processing_error: str | None = None
+    processed_filename: str | None
+    processing_error: str | None
 
     duration: float | None = None
     width: int | None = None
@@ -29,26 +29,86 @@ class MediaResponse(BaseModel):
 
     created_at: datetime
 
+
 class MediaConvertRequest(BaseModel):
-    format: str = "mp4"
+    format: str
 
-    resolution: str | None = None
-    custom_width: int | None = Field(default=None, ge=16)
-    custom_height: int | None = Field(default=None, ge=16)
-
-    fps: float | None = Field(default=None, gt=0, le=240)
-
+    width: int | None = None
+    height: int | None = None
+    fps: int | None = None
+    video_bitrate: str | None = None
+    audio_bitrate: str | None = None
     video_codec: str | None = None
-
-    quality: int | None = Field(default=None, ge=0, le=51)
-
-    bitrate: str | None = None
-
-    aspect_ratio: str | None = None
-
+    audio_codec: str | None = None
 
 
 class MediaEditRequest(BaseModel):
     operation: str
     start: float = Field(ge=0)
     end: float = Field(gt=0)
+
+
+class MediaTransformRequest(BaseModel):
+    operation: str
+
+    width: int | None = Field(default=None, gt=0)
+    height: int | None = Field(default=None, gt=0)
+
+    x: int | None = Field(default=None, ge=0)
+    y: int | None = Field(default=None, ge=0)
+
+    angle: int | None = None
+
+    speed: float | None = Field(default=None, gt=0)
+
+
+class MediaFreezeRequest(BaseModel):
+    timestamp: float = Field(ge=0)
+    duration: float = Field(gt=0)
+
+
+class MediaOverlayRequest(BaseModel):
+    operation: str
+
+    text: str | None = None
+    image_filename: str | None = None
+
+    x: int = 10
+    y: int = 10
+
+    font_size: int = 32
+    opacity: float = Field(default=1.0, ge=0, le=1)
+
+
+
+class MediaMergeRequest(BaseModel):
+    media_ids: list[str]
+
+
+class MediaTransformRequest(BaseModel):
+    operation: str
+
+    width: int | None = None
+    height: int | None = None
+
+    angle: int | None = None
+
+    speed: float | None = None
+
+
+class MediaFreezeFrameRequest(BaseModel):
+    timestamp: float
+    duration: float = 1.0
+
+
+class MediaOverlayRequest(BaseModel):
+    operation: str
+
+    text: str | None = None
+    image_filename: str | None = None
+
+    x: int = 10
+    y: int = 10
+
+    font_size: int = 24
+    opacity: float = 1.0
