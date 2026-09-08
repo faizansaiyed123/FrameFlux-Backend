@@ -45,7 +45,10 @@ class ResumableUploadService:
 
     @staticmethod
     async def init_upload(
-        original_filename: str, total_size: int, chunk_size: Optional[int] = None
+        original_filename: str,
+        total_size: int,
+        chunk_size: Optional[int] = None,
+        user_id: Optional[UUID] = None,
     ) -> UUID:
         """Create a new resumable upload entry.
 
@@ -86,13 +89,14 @@ class ResumableUploadService:
                 "chunk_size": str(chunk_size),
                 "uploaded_chunks": "",  # comma‑separated list
                 "status": "in_progress",
+                "user_id": str(user_id) if user_id else "",
             },
         )
         await redis.close()
         return upload_id
 
     @staticmethod
-    async def _load_meta(upload_id: UUID) -> dict:
+    async def _load_meta(upload_id: UUID, user_id: Optional[UUID] = None) -> dict:
         redis = await create_pool(WorkerSettings.redis_settings)
         meta = await redis.hgetall(_redis_key(upload_id))
         await redis.close()
@@ -100,14 +104,21 @@ class ResumableUploadService:
             raise ValueError("Upload ID not found")
         # Decode bytes to str (arq returns bytes)
         meta = {k.decode() if isinstance(k, (bytes, bytearray)) else k: v.decode() if isinstance(v, (bytes, bytearray)) else v for k, v in meta.items()}
+        if user_id is not None and meta.get("user_id") and meta["user_id"] != str(user_id):
+            raise ValueError("Upload ID not found")
         return meta
 
     @staticmethod
-    async def store_chunk(upload_id: UUID, index: int, data: bytes) -> None:
+    async def store_chunk(
+        upload_id: UUID,
+        index: int,
+        data: bytes,
+        user_id: Optional[UUID] = None,
+    ) -> None:
         """Persist a single chunk to the temporary directory and update state.
         The ``index`` is zero‑based.
         """
-        meta = await ResumableUploadService._load_meta(upload_id)
+        meta = await ResumableUploadService._load_meta(upload_id, user_id=user_id)
         if meta.get("status") not in ("in_progress", "paused"):
             raise ValueError(f"Cannot store chunk when status is {meta.get('status')}")
 
@@ -127,19 +138,22 @@ class ResumableUploadService:
         await redis.close()
 
     @staticmethod
-    async def pause(upload_id: UUID) -> None:
+    async def pause(upload_id: UUID, user_id: Optional[UUID] = None) -> None:
+        await ResumableUploadService._load_meta(upload_id, user_id=user_id)
         redis = await create_pool(WorkerSettings.redis_settings)
         await redis.hset(_redis_key(upload_id), mapping={"status": "paused"})
         await redis.close()
 
     @staticmethod
-    async def resume(upload_id: UUID) -> None:
+    async def resume(upload_id: UUID, user_id: Optional[UUID] = None) -> None:
+        await ResumableUploadService._load_meta(upload_id, user_id=user_id)
         redis = await create_pool(WorkerSettings.redis_settings)
         await redis.hset(_redis_key(upload_id), mapping={"status": "in_progress"})
         await redis.close()
 
     @staticmethod
-    async def cancel(upload_id: UUID) -> None:
+    async def cancel(upload_id: UUID, user_id: Optional[UUID] = None) -> None:
+        await ResumableUploadService._load_meta(upload_id, user_id=user_id)
         # Remove temporary files
         temp_dir = _temp_dir(upload_id)
         if temp_dir.exists():
@@ -151,11 +165,15 @@ class ResumableUploadService:
 
 
     @staticmethod
-    async def finalize(upload_id: UUID, db_session) -> Media:
+    async def finalize(
+        upload_id: UUID,
+        db_session,
+        user_id: Optional[UUID] = None,
+    ) -> Media:
         """Assemble all chunks, move the file to its final location and create a
         :class:`Media` record in PostgreSQL.
         """
-        meta = await ResumableUploadService._load_meta(upload_id)
+        meta = await ResumableUploadService._load_meta(upload_id, user_id=user_id)
         if meta.get("status") == "canceled":
             raise ValueError("Cannot finalize a canceled upload")
 
@@ -191,6 +209,14 @@ class ResumableUploadService:
                 with open(part_path, "rb") as src:
                     shutil.copyfileobj(src, dst)
 
+        # Resolve user_id from meta if not passed
+        effective_user_id = user_id
+        if effective_user_id is None and meta.get("user_id"):
+            try:
+                effective_user_id = UUID(meta["user_id"])
+            except (ValueError, TypeError):
+                pass
+
         # Clean up temporary directory and Redis entry
         await ResumableUploadService.cancel(upload_id)
 
@@ -204,6 +230,7 @@ class ResumableUploadService:
             media_type=media_type,
             mime_type=mime_type,
             file_size=total_size,
+            user_id=effective_user_id,
         )
         db_session.add(media)
         await db_session.commit()

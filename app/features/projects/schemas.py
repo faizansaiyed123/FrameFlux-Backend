@@ -18,6 +18,7 @@ class ProjectResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    user_id: UUID | None = None
     name: str
     description: str | None
     created_at: datetime

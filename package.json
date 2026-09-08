@@ -1,0 +1,10 @@
+{
+  "name": "frameflux-api",
+  "version": "1.0.0",
+  "description": "Video transcoding and media processing REST API backend",
+  "scripts": {
+    "dev": "uv run uvicorn app.main:app --host 0.0.0.0 --port 3000",
+    "build": "uv sync --frozen --no-dev",
+    "start": "uv run uvicorn app.main:app --host 0.0.0.0 --port 3000"
+  }
+}

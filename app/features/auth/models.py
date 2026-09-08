@@ -27,6 +27,11 @@ class User(Base):
         nullable=False,
     )
 
+    full_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,

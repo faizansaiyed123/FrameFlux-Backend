@@ -10,10 +10,12 @@ from app.features.projects.schemas import ProjectCreate, ProjectUpdate
 async def create_project(
     db: AsyncSession,
     data: ProjectCreate,
+    user_id: UUID | None = None,
 ) -> Project:
     project = Project(
         name=data.name,
         description=data.description,
+        user_id=user_id,
     )
 
     db.add(project)
@@ -25,10 +27,13 @@ async def create_project(
 
 async def list_projects(
     db: AsyncSession,
+    user_id: UUID | None = None,
 ) -> list[Project]:
-    result = await db.execute(
-        select(Project).order_by(Project.updated_at.desc())
-    )
+    query = select(Project)
+    if user_id is not None:
+        query = query.where(Project.user_id == user_id)
+    query = query.order_by(Project.updated_at.desc())
+    result = await db.execute(query)
 
     return list(result.scalars().all())
 
@@ -36,10 +41,12 @@ async def list_projects(
 async def get_project(
     db: AsyncSession,
     project_id: UUID,
+    user_id: UUID | None = None,
 ) -> Project | None:
-    result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
+    query = select(Project).where(Project.id == project_id)
+    if user_id is not None:
+        query = query.where(Project.user_id == user_id)
+    result = await db.execute(query)
 
     return result.scalar_one_or_none()
 

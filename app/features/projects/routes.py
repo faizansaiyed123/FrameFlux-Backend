@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.features.auth.dependencies import get_current_active_user
+from app.features.auth.models import User
 from app.features.media.models import Media
 from app.features.projects.schemas import (
     ProjectCreate,
@@ -33,9 +35,10 @@ router = APIRouter(
 )
 async def create(
     data: ProjectCreate,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await create_project(db, data)
+    return await create_project(db, data, user_id=current_user.id)
 
 
 @router.get(
@@ -43,9 +46,10 @@ async def create(
     response_model=list[ProjectResponse],
 )
 async def list_all(
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await list_projects(db)
+    return await list_projects(db, user_id=current_user.id)
 
 
 @router.get(
@@ -54,9 +58,10 @@ async def list_all(
 )
 async def get_one(
     project_id: UUID,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    project = await get_project(db, project_id)
+    project = await get_project(db, project_id, user_id=current_user.id)
 
     if project is None:
         raise HTTPException(
@@ -74,9 +79,10 @@ async def get_one(
 async def update(
     project_id: UUID,
     data: ProjectUpdate,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    project = await get_project(db, project_id)
+    project = await get_project(db, project_id, user_id=current_user.id)
 
     if project is None:
         raise HTTPException(
@@ -93,9 +99,10 @@ async def update(
 )
 async def delete(
     project_id: UUID,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    project = await get_project(db, project_id)
+    project = await get_project(db, project_id, user_id=current_user.id)
 
     if project is None:
         raise HTTPException(
@@ -111,10 +118,11 @@ async def delete(
 )
 async def list_project_media(
     project_id: UUID,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # First verify that the project exists.
-    project = await get_project(db, project_id)
+    # First verify that the project exists and belongs to the current user.
+    project = await get_project(db, project_id, user_id=current_user.id)
 
     if project is None:
         raise HTTPException(
@@ -124,7 +132,10 @@ async def list_project_media(
 
     result = await db.execute(
         select(Media)
-        .where(Media.project_id == project_id)
+        .where(
+            Media.project_id == project_id,
+            (Media.user_id == current_user.id) | (Media.user_id.is_(None)),
+        )
         .order_by(Media.created_at.desc())
     )
 
@@ -133,9 +144,10 @@ async def list_project_media(
 @router.post("/{project_id}/process")
 async def process_project(
     project_id: UUID,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    project = await get_project(db, project_id)
+    project = await get_project(db, project_id, user_id=current_user.id)
 
     if project is None:
         raise HTTPException(
@@ -144,7 +156,10 @@ async def process_project(
         )
 
     result = await db.execute(
-        select(Media).where(Media.project_id == project_id)
+        select(Media).where(
+            Media.project_id == project_id,
+            (Media.user_id == current_user.id) | (Media.user_id.is_(None)),
+        )
     )
 
     media_list = result.scalars().all()
@@ -192,9 +207,10 @@ async def process_project(
 @router.get("/{project_id}/status")
 async def project_processing_status(
     project_id: UUID,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    project = await get_project(db, project_id)
+    project = await get_project(db, project_id, user_id=current_user.id)
 
     if project is None:
         raise HTTPException(
@@ -203,7 +219,10 @@ async def project_processing_status(
         )
 
     result = await db.execute(
-        select(Media).where(Media.project_id == project_id)
+        select(Media).where(
+            Media.project_id == project_id,
+            (Media.user_id == current_user.id) | (Media.user_id.is_(None)),
+        )
     )
 
     media_list = result.scalars().all()

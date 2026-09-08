@@ -1,3 +1,4 @@
+from pathlib import Path
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -5,6 +6,9 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
+from app.features.auth.dependencies import get_current_active_user
+from app.features.auth.models import User
 from app.features.media.models import Media
 from app.features.media.schemas import (
     MediaConvertRequest,
@@ -25,6 +29,7 @@ from app.features.jobs.service import (
     set_processing_progress,
 )
 from app.features.media.service import delete_media_file, save_upload
+from app.features.projects.service import get_project
 from app.infrastructure.database import get_db
 from app.features.media.processor import get_uploaded_file
 from app.infrastructure.worker import create_worker_pool
@@ -51,6 +56,7 @@ router = APIRouter(
 async def get_media_or_404(
     media_id: UUID,
     db: AsyncSession,
+    user_id: UUID | None = None,
 ) -> Media:
     result = await db.execute(
         select(Media).where(Media.id == media_id)
@@ -64,7 +70,60 @@ async def get_media_or_404(
             detail="Media not found",
         )
 
+    media_user_id = getattr(media, "user_id", None)
+    if user_id is not None and media_user_id is not None and media_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Media not found",
+        )
+
     return media
+
+
+async def verify_media_references_ownership(
+    media_refs: list[str],
+    user_id: UUID,
+    db: AsyncSession,
+) -> None:
+    for ref in media_refs:
+        if ".." in ref or "/" in ref or "\\" in ref:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid media reference",
+            )
+        query = select(Media)
+        try:
+            val_uuid = UUID(ref)
+            query = query.where((Media.id == val_uuid) | (Media.stored_filename == ref))
+        except (ValueError, TypeError):
+            query = query.where(Media.stored_filename == ref)
+
+        result = await db.execute(query)
+        matched_media = result.scalars().first()
+        if isinstance(matched_media, Media):
+            if matched_media.user_id is not None and matched_media.user_id != user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Cannot reference media belonging to another user",
+                )
+
+
+def verify_file_path_safety(file_path: Path, storage_dir: Path) -> Path:
+    resolved_storage = storage_dir.resolve()
+    resolved_file = file_path.resolve()
+    try:
+        resolved_file.relative_to(resolved_storage)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access to path outside storage directory is forbidden",
+        )
+    if not resolved_file.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Media file not found",
+        )
+    return resolved_file
 
 
 async def enqueue_media_job(
@@ -115,10 +174,12 @@ async def mark_processing_pending(
 )
 async def upload_media(
     file: UploadFile = File(...),
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     try:
         media = await save_upload(file)
+        media.user_id = current_user.id
 
         db.add(media)
         await db.commit()
@@ -142,13 +203,17 @@ async def upload_media(
 # ---------------------------------------------------------
 
 @router.post("/resumable/init", response_model=ResumableInitResponse)
-async def resumable_init(data: ResumableInitRequest):
+async def resumable_init(
+    data: ResumableInitRequest,
+    current_user: User = Depends(get_current_active_user),
+):
     """Initialize a resumable upload and return an upload_id."""
     try:
         upload_id = await ResumableUploadService.init_upload(
             original_filename=data.original_filename,
             total_size=data.total_size,
             chunk_size=data.chunk_size,
+            user_id=current_user.id,
         )
         return ResumableInitResponse(upload_id=str(upload_id))
     except HTTPException:
@@ -161,13 +226,14 @@ async def resumable_chunk(
     upload_id: UUID,
     index: int,
     file: UploadFile = File(...),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Upload a single chunk for the given upload_id."""
     if index < 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chunk index must be non-negative")
     content = await file.read()
     try:
-        await ResumableUploadService.store_chunk(upload_id, index, content)
+        await ResumableUploadService.store_chunk(upload_id, index, content, user_id=current_user.id)
     except HTTPException:
         raise
     except ValueError as exc:
@@ -175,17 +241,23 @@ async def resumable_chunk(
     return ChunkUploadResponse()
 
 @router.post("/resumable/{upload_id}/pause", response_model=ActionResponse)
-async def resumable_pause(upload_id: UUID):
+async def resumable_pause(
+    upload_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+):
     try:
-        await ResumableUploadService.pause(upload_id)
+        await ResumableUploadService.pause(upload_id, user_id=current_user.id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return ActionResponse(detail="paused")
 
 @router.post("/resumable/{upload_id}/resume", response_model=ActionResponse)
-async def resumable_resume(upload_id: UUID):
+async def resumable_resume(
+    upload_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+):
     try:
-        await ResumableUploadService.resume(upload_id)
+        await ResumableUploadService.resume(upload_id, user_id=current_user.id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return ActionResponse(detail="resumed")
@@ -195,13 +267,14 @@ async def resumable_retry(
     upload_id: UUID,
     index: int,
     file: UploadFile = File(...),
+    current_user: User = Depends(get_current_active_user),
 ) -> ChunkUploadResponse:
     """Retry uploading a single chunk for the given upload_id."""
     if index < 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chunk index must be non-negative")
     content = await file.read()
     try:
-        await ResumableUploadService.store_chunk(upload_id, index, content)
+        await ResumableUploadService.store_chunk(upload_id, index, content, user_id=current_user.id)
     except HTTPException:
         raise
     except ValueError as exc:
@@ -209,18 +282,25 @@ async def resumable_retry(
     return ChunkUploadResponse()
 
 @router.delete("/resumable/{upload_id}", response_model=ActionResponse)
-async def resumable_cancel(upload_id: UUID):
+async def resumable_cancel(
+    upload_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+):
     try:
-        await ResumableUploadService.cancel(upload_id)
+        await ResumableUploadService.cancel(upload_id, user_id=current_user.id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return ActionResponse(detail="canceled")
 
 @router.post("/resumable/{upload_id}/finalize", response_model=MediaResponse)
-async def resumable_finalize(upload_id: UUID, db: AsyncSession = Depends(get_db)):
+async def resumable_finalize(
+    upload_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Assemble chunks and create a Media record."""
     try:
-        media = await ResumableUploadService.finalize(upload_id, db)
+        media = await ResumableUploadService.finalize(upload_id, db, user_id=current_user.id)
     except HTTPException:
         raise
     except ValueError as exc:
@@ -236,10 +316,13 @@ async def resumable_finalize(upload_id: UUID, db: AsyncSession = Depends(get_db)
     response_model=list[MediaResponse],
 )
 async def list_media(
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(Media).order_by(Media.created_at.desc())
+        select(Media)
+        .where((Media.user_id == current_user.id) | (Media.user_id.is_(None)))
+        .order_by(Media.created_at.desc())
     )
 
     return result.scalars().all()
@@ -255,9 +338,10 @@ async def list_media(
 )
 async def get_media(
     media_id: UUID,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await get_media_or_404(media_id, db)
+    return await get_media_or_404(media_id, db, user_id=current_user.id)
 
 
 # ---------------------------------------------------------
@@ -271,9 +355,10 @@ async def get_media(
 )
 async def get_media_status_endpoint(
     media_id: UUID,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db)
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     return await get_media_progress(media_id, db_media=media)
 
 
@@ -284,9 +369,10 @@ async def get_media_status_endpoint(
 )
 async def get_media_progress_endpoint(
     media_id: UUID,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db)
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     return await get_media_progress(media_id, db_media=media)
 
 
@@ -297,6 +383,8 @@ async def get_media_progress_endpoint(
 )
 async def get_media_job_endpoint(
     job_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
 ):
     job_data = await get_job_status(job_id)
     if not job_data:
@@ -304,6 +392,19 @@ async def get_media_job_endpoint(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Job '{job_id}' not found",
         )
+    media_id = job_data.get("media_id")
+    if media_id:
+        try:
+            m_uuid = UUID(media_id)
+            res = await db.execute(select(Media).where(Media.id == m_uuid))
+            media = res.scalar_one_or_none()
+            if media and media.user_id is not None and media.user_id != current_user.id:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Job '{job_id}' not found",
+                )
+        except (ValueError, TypeError):
+            pass
     return job_data
 
 
@@ -314,9 +415,10 @@ async def get_media_job_endpoint(
 @router.post("/{media_id}/process")
 async def process_media_endpoint(
     media_id: UUID,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db)
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
 
     if media.processing_status == "processing":
         raise HTTPException(
@@ -353,9 +455,10 @@ async def process_media_endpoint(
 async def convert_media_endpoint(
     media_id: UUID,
     data: MediaConvertRequest,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db)
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
 
     # Determine output format from request and prepare filename
     extension = data.format.lower().lstrip(".")
@@ -401,6 +504,7 @@ async def convert_media_endpoint(
 async def edit_media_endpoint(
     media_id: UUID,
     data: MediaEditRequest,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     allowed_operations = {
@@ -421,7 +525,7 @@ async def edit_media_endpoint(
             detail="End time must be greater than start time",
         )
 
-    media = await get_media_or_404(media_id, db)
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
 
     output_filename = (
         f"{media_id}_{data.operation}_{uuid4().hex[:8]}.mp4"
@@ -456,9 +560,16 @@ async def edit_media_endpoint(
 async def attach_media_to_project(
     media_id: UUID,
     project_id: UUID,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db)
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
+    project = await get_project(db, project_id, user_id=current_user.id)
+    if project is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Project not found",
+        )
 
     media.project_id = project_id
 
@@ -475,22 +586,19 @@ async def attach_media_to_project(
 @router.get("/{media_id}/file")
 async def get_media_file(
     media_id: UUID,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db)
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
 
     file_path = get_uploaded_file(
         media.stored_filename
     )
-
-    if not file_path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="Media file not found",
-        )
+    settings = get_settings()
+    safe_path = verify_file_path_safety(file_path, Path(settings.upload_dir))
 
     return FileResponse(
-        path=file_path,
+        path=safe_path,
         media_type=media.mime_type,
         filename=media.original_filename,
     )
@@ -503,9 +611,10 @@ async def get_media_file(
 @router.get("/{media_id}/processed")
 async def get_processed_media(
     media_id: UUID,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db)
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
 
     if not media.processed_filename:
         raise HTTPException(
@@ -516,15 +625,11 @@ async def get_processed_media(
     file_path = get_uploaded_file(
         media.processed_filename
     )
-
-    if not file_path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="Processed media file not found",
-        )
+    settings = get_settings()
+    safe_path = verify_file_path_safety(file_path, Path(settings.upload_dir))
 
     return FileResponse(
-        path=file_path,
+        path=safe_path,
         media_type=media.mime_type,
         filename=media.processed_filename,
     )
@@ -540,9 +645,10 @@ async def get_processed_media(
 )
 async def delete_media(
     media_id: UUID,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db)
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
 
     await delete_media_file(
         media.stored_filename
@@ -565,9 +671,11 @@ async def delete_media(
 async def merge_media_endpoint(
     media_id: UUID,
     data: MediaMergeRequest,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db)
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
+    await verify_media_references_ownership(data.media_ids, current_user.id, db)
 
     input_filenames = data.media_ids
 
@@ -601,9 +709,10 @@ async def merge_media_endpoint(
 async def transform_media_endpoint(
     media_id: UUID,
     data: MediaTransformRequest,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db)
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
 
     output_filename = (
         f"{media_id}_{data.operation}_{uuid4().hex[:8]}.mp4"
@@ -638,9 +747,10 @@ async def transform_media_endpoint(
 async def freeze_frame_endpoint(
     media_id: UUID,
     data: MediaFreezeFrameRequest,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db)
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
 
     output_filename = (
         f"{media_id}_freeze_{uuid4().hex[:8]}.mp4"
@@ -674,9 +784,16 @@ async def freeze_frame_endpoint(
 async def overlay_media_endpoint(
     media_id: UUID,
     data: MediaOverlayRequest,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db)
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
+    if data.image_filename:
+        await verify_media_references_ownership([data.image_filename], current_user.id, db)
+    if data.overlays:
+        for ov in data.overlays:
+            if ov.image_filename:
+                await verify_media_references_ownership([ov.image_filename], current_user.id, db)
 
     operation_name = data.operation or ("multi_overlay" if data.overlays else "overlay")
     output_filename = (
@@ -711,9 +828,10 @@ async def overlay_media_endpoint(
 async def split_media_endpoint(
     media_id: UUID,
     data: MediaSplitRequest,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db)
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     output_prefix = f"{media_id}_split_{uuid4().hex[:8]}"
     job = await enqueue_media_job(
         "split_media_task",
@@ -739,9 +857,10 @@ async def split_media_endpoint(
 async def keep_clips_endpoint(
     media_id: UUID,
     data: MediaClipsRequest,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db)
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     output_filename = f"{media_id}_keep_{uuid4().hex[:8]}.mp4"
     clip_tuples = [[c.start, c.end] for c in data.clips]
     job = await enqueue_media_job(
@@ -769,9 +888,10 @@ async def keep_clips_endpoint(
 async def delete_clips_endpoint(
     media_id: UUID,
     data: MediaClipsRequest,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db)
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     output_filename = f"{media_id}_delete_{uuid4().hex[:8]}.mp4"
     clip_tuples = [[c.start, c.end] for c in data.clips]
     job = await enqueue_media_job(
@@ -799,9 +919,11 @@ async def delete_clips_endpoint(
 async def reorder_clips_endpoint(
     media_id: UUID,
     data: MediaMergeRequest,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db)
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
+    await verify_media_references_ownership(data.media_ids, current_user.id, db)
     output_filename = f"{media_id}_reorder_{uuid4().hex[:8]}.mp4"
     job = await enqueue_media_job(
         "merge_media_task",
@@ -826,9 +948,11 @@ async def reorder_clips_endpoint(
 async def append_clips_endpoint(
     media_id: UUID,
     data: MediaMergeRequest,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db)
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
+    await verify_media_references_ownership(data.media_ids, current_user.id, db)
     ordered_ids = [media.stored_filename]
     for m_id in data.media_ids:
         if m_id != media.stored_filename:
