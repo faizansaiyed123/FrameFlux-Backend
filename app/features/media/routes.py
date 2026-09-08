@@ -16,6 +16,14 @@ from app.infrastructure.database import get_db
 from app.infrastructure.worker import create_worker_pool
 from fastapi.responses import FileResponse
 from app.features.media.processor import get_uploaded_file
+from uuid import UUID, uuid4
+
+from app.features.media.schemas import MediaConvertRequest
+from app.infrastructure.tasks import convert_media_task
+from uuid import UUID, uuid4
+
+from app.features.media.schemas import MediaEditRequest
+from app.infrastructure.worker import create_worker_pool
 
 
 settings = get_settings()
@@ -335,3 +343,117 @@ async def get_processed_media(
         media_type="video/mp4",
         filename=media.processed_filename,
     )
+
+
+@router.post("/{media_id}/convert")
+async def convert_media_endpoint(
+    media_id: UUID,
+    data: MediaConvertRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Media).where(Media.id == media_id)
+    )
+
+    media = result.scalar_one_or_none()
+
+    if media is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Media not found",
+        )
+
+    extension = data.format.lower().lstrip(".")
+
+    output_filename = (
+        f"{media_id}_converted_{uuid4().hex[:8]}.{extension}"
+    )
+
+    options = data.model_dump(exclude_none=True)
+    options["output_format"] = extension
+
+    from app.infrastructure.worker import create_worker_pool
+
+    pool = await create_worker_pool()
+
+    try:
+        job = await pool.enqueue_job(
+            "convert_media_task",
+            str(media.id),
+            media.stored_filename,
+            output_filename,
+            options,
+        )
+    finally:
+        await pool.close()
+
+    media.processing_status = "pending"
+    media.processing_error = None
+    await db.commit()
+
+    return {
+        "media_id": str(media.id),
+        "status": "queued",
+        "job_id": job.job_id,
+        "output_filename": output_filename,
+    }
+
+@router.post("/{media_id}/edit")
+async def edit_media_endpoint(
+    media_id: UUID,
+    data: MediaEditRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    if data.operation not in {"trim", "cut", "extract"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Operation must be trim, cut, or extract",
+        )
+
+    if data.end <= data.start:
+        raise HTTPException(
+            status_code=400,
+            detail="End time must be greater than start time",
+        )
+
+    result = await db.execute(
+        select(Media).where(Media.id == media_id)
+    )
+    media = result.scalar_one_or_none()
+
+    if media is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Media not found",
+        )
+
+    output_filename = (
+        f"{media_id}_{data.operation}_{uuid4().hex[:8]}.mp4"
+    )
+
+    pool = await create_worker_pool()
+
+    try:
+        job = await pool.enqueue_job(
+            "edit_media_task",
+            str(media.id),
+            media.stored_filename,
+            output_filename,
+            data.operation,
+            data.start,
+            data.end,
+        )
+    finally:
+        await pool.close()
+
+    media.processing_status = "pending"
+    media.processing_error = None
+    await db.commit()
+
+    return {
+        "media_id": str(media.id),
+        "status": "queued",
+        "operation": data.operation,
+        "job_id": job.job_id,
+        "output_filename": output_filename,
+    }
