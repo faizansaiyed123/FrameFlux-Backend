@@ -1,5 +1,3 @@
-# app/features/media/models.py
-
 from datetime import datetime
 from uuid import UUID, uuid4
 
@@ -43,6 +41,33 @@ class Media(Base):
     file_size: Mapped[int] = mapped_column(
         BigInteger,
         nullable=False,
+    )
+
+    duration: Mapped[float | None] = mapped_column(
+        nullable=True,
+    )
+
+    width: Mapped[int | None] = mapped_column(
+        nullable=True,
+    )
+
+    height: Mapped[int | None] = mapped_column(
+        nullable=True,
+    )
+
+    video_codec: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+
+    audio_codec: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+
+    fps: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
     )
 
     project_id: Mapped[UUID | None] = mapped_column(
