@@ -187,13 +187,25 @@ async def convert_media_endpoint(
 ):
     media = await get_media_or_404(media_id, db)
 
+    # Determine output format from request and prepare filename
     extension = data.format.lower().lstrip(".")
+    output_filename = f"{media_id}_converted_{uuid4().hex[:8]}.{extension}"
 
-    output_filename = (
-        f"{media_id}_converted_{uuid4().hex[:8]}.{extension}"
-    )
-
+    # Build options dict, excluding None values
     options = data.model_dump(exclude_none=True)
+    # Remove the original 'format' key to avoid unexpected argument
+    options.pop("format", None)
+    # Map schema fields to conversion function parameter names
+    if "width" in options:
+        options["custom_width"] = options.pop("width")
+    if "height" in options:
+        options["custom_height"] = options.pop("height")
+    if "video_bitrate" in options:
+        options["bitrate"] = options.pop("video_bitrate")
+    # audio_bitrate and audio_codec are not used by convert_media; remove them if present
+    options.pop("audio_bitrate", None)
+    options.pop("audio_codec", None)
+    # Set the required output_format parameter
     options["output_format"] = extension
 
     job = await enqueue_media_job(
