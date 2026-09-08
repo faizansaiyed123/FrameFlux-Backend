@@ -1,6 +1,5 @@
 from datetime import datetime
 from uuid import UUID
-
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -13,9 +12,7 @@ class MediaResponse(BaseModel):
     media_type: str
     mime_type: str
     file_size: int
-
     project_id: UUID | None
-
     processing_status: str
     processed_filename: str | None
     processing_error: str | None
@@ -36,8 +33,10 @@ class MediaConvertRequest(BaseModel):
     width: int | None = None
     height: int | None = None
     fps: int | None = None
+
     video_bitrate: str | None = None
     audio_bitrate: str | None = None
+
     video_codec: str | None = None
     audio_codec: str | None = None
 
@@ -46,6 +45,19 @@ class MediaEditRequest(BaseModel):
     operation: str
     start: float = Field(ge=0)
     end: float = Field(gt=0)
+
+
+class ClipInterval(BaseModel):
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+
+
+class MediaSplitRequest(BaseModel):
+    split_points: list[float] = Field(min_length=1)
+
+
+class MediaClipsRequest(BaseModel):
+    clips: list[ClipInterval] = Field(min_length=1)
 
 
 class MediaTransformRequest(BaseModel):
@@ -85,8 +97,7 @@ class MediaOverlayRequest(BaseModel):
 
 
 class MediaMergeRequest(BaseModel):
-    media_ids: list[str]
-
+    media_ids: list[str] = Field(min_length=2)
 
 
 # Resumable upload schemas

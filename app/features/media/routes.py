@@ -14,6 +14,8 @@ from app.features.media.schemas import (
     MediaFreezeFrameRequest,
     MediaOverlayRequest,
     MediaResponse,
+    MediaSplitRequest,
+    MediaClipsRequest,
 )
 from app.features.media.service import delete_media_file, save_upload
 from app.infrastructure.database import get_db
@@ -616,6 +618,152 @@ async def overlay_media_endpoint(
         "media_id": str(media_id),
         "status": "queued",
         "operation": data.operation,
+        "job_id": job.job_id,
+        "output_filename": output_filename,
+    }
+
+
+# ---------------------------------------------------------
+# SPLIT
+# ---------------------------------------------------------
+@router.post("/{media_id}/split")
+async def split_media_endpoint(
+    media_id: UUID,
+    data: MediaSplitRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    media = await get_media_or_404(media_id, db)
+    output_prefix = f"{media_id}_split_{uuid4().hex[:8]}"
+    job = await enqueue_media_job(
+        "split_media_task",
+        str(media_id),
+        media.stored_filename,
+        output_prefix,
+        data.split_points,
+    )
+    await mark_processing_pending(media, db)
+    return {
+        "media_id": str(media_id),
+        "status": "queued",
+        "operation": "split",
+        "job_id": job.job_id,
+        "output_prefix": output_prefix,
+    }
+
+
+# ---------------------------------------------------------
+# KEEP SELECTED CLIPS
+# ---------------------------------------------------------
+@router.post("/{media_id}/clips/keep")
+async def keep_clips_endpoint(
+    media_id: UUID,
+    data: MediaClipsRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    media = await get_media_or_404(media_id, db)
+    output_filename = f"{media_id}_keep_{uuid4().hex[:8]}.mp4"
+    clip_tuples = [[c.start, c.end] for c in data.clips]
+    job = await enqueue_media_job(
+        "clips_media_task",
+        str(media_id),
+        media.stored_filename,
+        output_filename,
+        "keep",
+        clip_tuples,
+    )
+    await mark_processing_pending(media, db)
+    return {
+        "media_id": str(media_id),
+        "status": "queued",
+        "operation": "keep_clips",
+        "job_id": job.job_id,
+        "output_filename": output_filename,
+    }
+
+
+# ---------------------------------------------------------
+# DELETE SELECTED CLIPS
+# ---------------------------------------------------------
+@router.post("/{media_id}/clips/delete")
+async def delete_clips_endpoint(
+    media_id: UUID,
+    data: MediaClipsRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    media = await get_media_or_404(media_id, db)
+    output_filename = f"{media_id}_delete_{uuid4().hex[:8]}.mp4"
+    clip_tuples = [[c.start, c.end] for c in data.clips]
+    job = await enqueue_media_job(
+        "clips_media_task",
+        str(media_id),
+        media.stored_filename,
+        output_filename,
+        "delete",
+        clip_tuples,
+    )
+    await mark_processing_pending(media, db)
+    return {
+        "media_id": str(media_id),
+        "status": "queued",
+        "operation": "delete_clips",
+        "job_id": job.job_id,
+        "output_filename": output_filename,
+    }
+
+
+# ---------------------------------------------------------
+# REORDER CLIPS
+# ---------------------------------------------------------
+@router.post("/{media_id}/clips/reorder")
+async def reorder_clips_endpoint(
+    media_id: UUID,
+    data: MediaMergeRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    media = await get_media_or_404(media_id, db)
+    output_filename = f"{media_id}_reorder_{uuid4().hex[:8]}.mp4"
+    job = await enqueue_media_job(
+        "merge_media_task",
+        str(media_id),
+        data.media_ids,
+        output_filename,
+    )
+    await mark_processing_pending(media, db)
+    return {
+        "media_id": str(media_id),
+        "status": "queued",
+        "operation": "reorder",
+        "job_id": job.job_id,
+        "output_filename": output_filename,
+    }
+
+
+# ---------------------------------------------------------
+# APPEND CLIPS
+# ---------------------------------------------------------
+@router.post("/{media_id}/clips/append")
+async def append_clips_endpoint(
+    media_id: UUID,
+    data: MediaMergeRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    media = await get_media_or_404(media_id, db)
+    ordered_ids = [media.stored_filename]
+    for m_id in data.media_ids:
+        if m_id != media.stored_filename:
+            ordered_ids.append(m_id)
+    output_filename = f"{media_id}_append_{uuid4().hex[:8]}.mp4"
+    job = await enqueue_media_job(
+        "merge_media_task",
+        str(media_id),
+        ordered_ids,
+        output_filename,
+    )
+    await mark_processing_pending(media, db)
+    return {
+        "media_id": str(media_id),
+        "status": "queued",
+        "operation": "append",
         "job_id": job.job_id,
         "output_filename": output_filename,
     }
