@@ -1,6 +1,8 @@
 from pathlib import Path
 from uuid import UUID
 
+from arq import create_pool
+from arq.connections import RedisSettings
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
@@ -8,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.features.media.models import Media
-from app.features.media.processor import process_media
 from app.features.media.schemas import MediaResponse
 from app.features.media.service import delete_media_file, save_upload
 from app.infrastructure.database import get_db
@@ -16,6 +17,16 @@ from app.infrastructure.database import get_db
 settings = get_settings()
 
 router = APIRouter(prefix="/media", tags=["Media"])
+
+
+async def get_redis_pool():
+    return await create_pool(
+        RedisSettings(
+            host="localhost",
+            port=6379,
+            database=0,
+        )
+    )
 
 
 @router.post(
@@ -60,28 +71,21 @@ async def process_media_endpoint(
             detail="Media not found",
         )
 
+    redis = await get_redis_pool()
+
     try:
-        output_filename = process_media(
-            media.id,
+        job = await redis.enqueue_job(
+            "process_media_task",
+            str(media.id),
             media.stored_filename,
         )
-
-    except FileNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(exc),
-        )
-
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Media processing failed: {exc}",
-        )
+    finally:
+        await redis.close()
 
     return {
         "media_id": str(media.id),
-        "status": "processed",
-        "output_filename": output_filename,
+        "status": "queued",
+        "job_id": job.job_id,
     }
 
 
@@ -176,6 +180,9 @@ async def delete_media(
         )
 
     await delete_media_file(media.stored_filename)
+
+    processed_filename = f"{media.id}_processed.mp4"
+    await delete_media_file(processed_filename)
 
     await db.delete(media)
     await db.commit()
