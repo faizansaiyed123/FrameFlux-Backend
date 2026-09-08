@@ -1,13 +1,19 @@
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.features.media.models import Media
+from app.features.media.processor import process_media
 from app.features.media.schemas import MediaResponse
 from app.features.media.service import delete_media_file, save_upload
 from app.infrastructure.database import get_db
+
+settings = get_settings()
 
 router = APIRouter(prefix="/media", tags=["Media"])
 
@@ -23,12 +29,93 @@ async def upload_media(
 ):
     try:
         media = await save_upload(file)
+
         db.add(media)
         await db.commit()
         await db.refresh(media)
+
         return media
+
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
+
+@router.post("/{media_id}/process")
+async def process_media_endpoint(
+    media_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Media).where(Media.id == media_id)
+    )
+
+    media = result.scalar_one_or_none()
+
+    if media is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Media not found",
+        )
+
+    try:
+        output_filename = process_media(
+            media.id,
+            media.stored_filename,
+        )
+
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Media processing failed: {exc}",
+        )
+
+    return {
+        "media_id": str(media.id),
+        "status": "processed",
+        "output_filename": output_filename,
+    }
+
+
+@router.get("/{media_id}/processed")
+async def get_processed_media(
+    media_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Media).where(Media.id == media_id)
+    )
+
+    media = result.scalar_one_or_none()
+
+    if media is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Media not found",
+        )
+
+    processed_filename = f"{media.id}_processed.mp4"
+    processed_path = Path(settings.upload_dir) / processed_filename
+
+    if not processed_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Processed media not found. Process the media first.",
+        )
+
+    return FileResponse(
+        path=processed_path,
+        media_type="video/mp4",
+        filename=processed_filename,
+    )
 
 
 @router.get(
@@ -41,6 +128,7 @@ async def list_media(
     result = await db.execute(
         select(Media).order_by(Media.created_at.desc())
     )
+
     return result.scalars().all()
 
 
@@ -55,10 +143,14 @@ async def get_media(
     result = await db.execute(
         select(Media).where(Media.id == media_id)
     )
+
     media = result.scalar_one_or_none()
 
     if media is None:
-        raise HTTPException(status_code=404, detail="Media not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Media not found",
+        )
 
     return media
 
@@ -74,10 +166,14 @@ async def delete_media(
     result = await db.execute(
         select(Media).where(Media.id == media_id)
     )
+
     media = result.scalar_one_or_none()
 
     if media is None:
-        raise HTTPException(status_code=404, detail="Media not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Media not found",
+        )
 
     await delete_media_file(media.stored_filename)
 
