@@ -1,8 +1,10 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.features.media.models import Media
 from app.features.projects.schemas import (
     ProjectCreate,
     ProjectResponse,
@@ -101,3 +103,28 @@ async def delete(
         )
 
     await delete_project(db, project)
+
+
+@router.get(
+    "/{project_id}/media",
+)
+async def list_project_media(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    # First verify that the project exists.
+    project = await get_project(db, project_id)
+
+    if project is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Project not found",
+        )
+
+    result = await db.execute(
+        select(Media)
+        .where(Media.project_id == project_id)
+        .order_by(Media.created_at.desc())
+    )
+
+    return result.scalars().all()
