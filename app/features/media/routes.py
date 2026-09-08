@@ -240,3 +240,26 @@ async def process_media_endpoint(
         "status": "queued",
         "job_id": job.job_id,
     }
+@router.patch("/{media_id}/project/{project_id}")
+async def attach_media_to_project(
+    media_id: UUID,
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    media_result = await db.execute(
+        select(Media).where(Media.id == media_id)
+    )
+    media = media_result.scalar_one_or_none()
+
+    if media is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Media not found",
+        )
+
+    media.project_id = project_id
+
+    await db.commit()
+    await db.refresh(media)
+
+    return media
