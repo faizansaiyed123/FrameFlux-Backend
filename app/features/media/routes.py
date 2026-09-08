@@ -13,6 +13,8 @@ from app.features.media.models import Media
 from app.features.media.schemas import MediaResponse
 from app.features.media.service import delete_media_file, save_upload
 from app.infrastructure.database import get_db
+from app.infrastructure.worker import create_worker_pool
+
 
 settings = get_settings()
 
@@ -186,3 +188,55 @@ async def delete_media(
 
     await db.delete(media)
     await db.commit()
+
+
+@router.post("/{media_id}/process")
+async def process_media_endpoint(
+    media_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Media).where(Media.id == media_id)
+    )
+
+    media = result.scalar_one_or_none()
+
+    if media is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Media not found",
+        )
+
+    if media.processing_status == "processing":
+        raise HTTPException(
+            status_code=409,
+            detail="Media is already processing",
+        )
+
+    if media.processing_status == "completed":
+        raise HTTPException(
+            status_code=409,
+            detail="Media is already processed",
+        )
+
+    media.processing_status = "pending"
+    media.processing_error = None
+
+    await db.commit()
+
+    pool = await create_worker_pool()
+
+    try:
+        job = await pool.enqueue_job(
+            "process_media_task",
+            str(media.id),
+            media.stored_filename,
+        )
+    finally:
+        await pool.close()
+
+    return {
+        "media_id": str(media.id),
+        "status": "queued",
+        "job_id": job.job_id,
+    }
