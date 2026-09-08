@@ -40,6 +40,10 @@ class MediaConvertRequest(BaseModel):
     video_codec: str | None = None
     audio_codec: str | None = None
 
+    aspect_ratio: str | None = None
+    quality: int | None = None
+    resolution: str | None = None
+
 
 class MediaEditRequest(BaseModel):
     operation: str
@@ -83,17 +87,28 @@ class MediaFreezeFrameRequest(BaseModel):
 MediaFreezeRequest = MediaFreezeFrameRequest
 
 
-class MediaOverlayRequest(BaseModel):
-    operation: str
-
+class OverlayItem(BaseModel):
+    operation: str  # "text", "image", "watermark"
     text: str | None = None
     image_filename: str | None = None
-
     x: int = 10
     y: int = 10
-
     font_size: int = 32
     opacity: float = Field(default=1.0, ge=0, le=1)
+
+
+class MediaOverlayRequest(BaseModel):
+    # Single overlay fields (backward compatibility)
+    operation: str | None = None
+    text: str | None = None
+    image_filename: str | None = None
+    x: int = 10
+    y: int = 10
+    font_size: int = 32
+    opacity: float = Field(default=1.0, ge=0, le=1)
+
+    # Multi-overlay field
+    overlays: list[OverlayItem] | None = None
 
 
 class MediaMergeRequest(BaseModel):

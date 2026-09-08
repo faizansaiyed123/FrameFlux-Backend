@@ -513,50 +513,60 @@ async def overlay_media_task(
                 output_filename
             )
 
-            operation = options["operation"]
+            from app.features.media.editing import apply_multiple_overlays
 
-            if operation == "text":
-                add_text_overlay(
+            if "overlays" in options and options["overlays"]:
+                operation = "multi_overlay"
+                prepared_overlays = []
+                for item in options["overlays"]:
+                    entry = dict(item)
+                    if entry.get("operation") in ("image", "watermark") and entry.get("image_filename"):
+                        entry["image_path"] = str(get_uploaded_file(entry["image_filename"]))
+                    prepared_overlays.append(entry)
+                apply_multiple_overlays(
                     str(input_path),
                     str(output_path),
-                    options["text"],
-                    options["x"],
-                    options["y"],
-                    options["font_size"],
+                    prepared_overlays,
                 )
-
-            elif operation == "image":
-                overlay_path = get_uploaded_file(
-                    options["image_filename"]
-                )
-
-                add_image_overlay(
-                    str(input_path),
-                    str(overlay_path),
-                    str(output_path),
-                    options["x"],
-                    options["y"],
-                    options["opacity"],
-                )
-
-            elif operation == "watermark":
-                watermark_path = get_uploaded_file(
-                    options["image_filename"]
-                )
-
-                add_watermark(
-                    str(input_path),
-                    str(watermark_path),
-                    str(output_path),
-                    options["x"],
-                    options["y"],
-                    options["opacity"],
-                )
-
             else:
-                raise ValueError(
-                    "Operation must be text, image, or watermark"
-                )
+                operation = options.get("operation")
+                if operation == "text":
+                    add_text_overlay(
+                        str(input_path),
+                        str(output_path),
+                        options["text"],
+                        options.get("x", 10),
+                        options.get("y", 10),
+                        options.get("font_size", 32),
+                    )
+                elif operation == "image":
+                    overlay_path = get_uploaded_file(
+                        options["image_filename"]
+                    )
+                    add_image_overlay(
+                        str(input_path),
+                        str(overlay_path),
+                        str(output_path),
+                        options.get("x", 10),
+                        options.get("y", 10),
+                        options.get("opacity", 1.0),
+                    )
+                elif operation == "watermark":
+                    watermark_path = get_uploaded_file(
+                        options["image_filename"]
+                    )
+                    add_watermark(
+                        str(input_path),
+                        str(watermark_path),
+                        str(output_path),
+                        options.get("x", 10),
+                        options.get("y", 10),
+                        options.get("opacity", 1.0),
+                    )
+                else:
+                    raise ValueError(
+                        "Operation must be text, image, or watermark"
+                    )
 
             media.processed_filename = output_filename
             media.processing_status = "completed"

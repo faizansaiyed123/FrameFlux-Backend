@@ -289,9 +289,6 @@ async def convert_media_endpoint(
         options["custom_height"] = options.pop("height")
     if "video_bitrate" in options:
         options["bitrate"] = options.pop("video_bitrate")
-    # audio_bitrate and audio_codec are not used by convert_media; remove them if present
-    options.pop("audio_bitrate", None)
-    options.pop("audio_codec", None)
     # Set the required output_format parameter
     options["output_format"] = extension
 
@@ -598,8 +595,9 @@ async def overlay_media_endpoint(
 ):
     media = await get_media_or_404(media_id, db)
 
+    operation_name = data.operation or ("multi_overlay" if data.overlays else "overlay")
     output_filename = (
-        f"{media_id}_{data.operation}_{uuid4().hex[:8]}.mp4"
+        f"{media_id}_{operation_name}_{uuid4().hex[:8]}.mp4"
     )
 
     options = data.model_dump(exclude_none=True)
@@ -617,7 +615,7 @@ async def overlay_media_endpoint(
     return {
         "media_id": str(media_id),
         "status": "queued",
-        "operation": data.operation,
+        "operation": operation_name,
         "job_id": job.job_id,
         "output_filename": output_filename,
     }

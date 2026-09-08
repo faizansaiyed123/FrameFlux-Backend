@@ -475,3 +475,74 @@ def add_watermark(
         y,
         opacity,
     )
+
+
+def apply_multiple_overlays(
+    input_path: str,
+    output_path: str,
+    overlays: list[dict],
+) -> None:
+    if not Path(input_path).exists():
+        raise FileNotFoundError(f"Media file not found: {input_path}")
+    if not overlays:
+        raise ValueError("At least one overlay is required")
+
+    font_path = _get_system_font()
+    stream = ffmpeg.input(input_path)
+    video = stream.video
+
+    for item in overlays:
+        op = item.get("operation")
+        x = item.get("x", 10)
+        y = item.get("y", 10)
+
+        if op == "text":
+            text = item.get("text")
+            if not text:
+                raise ValueError("Text is required for text overlay")
+            font_size = item.get("font_size", 32)
+            drawtext_kwargs = {
+                "text": text,
+                "x": x,
+                "y": y,
+                "fontsize": font_size,
+                "fontcolor": "white",
+                "box": 1,
+                "boxcolor": "black@0.65",
+                "boxborderw": 12,
+            }
+            if font_path:
+                drawtext_kwargs["fontfile"] = font_path
+            video = video.filter("drawtext", **drawtext_kwargs)
+
+        elif op in ("image", "watermark"):
+            img_path = item.get("image_path")
+            if not img_path or not Path(img_path).exists():
+                raise FileNotFoundError(f"Overlay image file not found: {img_path}")
+            opacity = item.get("opacity", 1.0)
+            overlay_stream = ffmpeg.input(img_path)
+            overlay_video = overlay_stream.video.filter("format", "rgba")
+            if opacity < 1.0:
+                overlay_video = overlay_video.filter("colorchannelmixer", aa=opacity)
+            video = ffmpeg.overlay(video, overlay_video, x=x, y=y)
+
+        else:
+            raise ValueError(f"Unsupported overlay operation: {op}")
+
+    if _has_audio(input_path):
+        output = ffmpeg.output(
+            video,
+            stream.audio,
+            output_path,
+            vcodec="libx264",
+            acodec="aac",
+            movflags="+faststart",
+        )
+    else:
+        output = ffmpeg.output(
+            video,
+            output_path,
+            vcodec="libx264",
+            movflags="+faststart",
+        )
+    _run(output)
