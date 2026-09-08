@@ -14,6 +14,8 @@ from app.features.media.schemas import MediaResponse
 from app.features.media.service import delete_media_file, save_upload
 from app.infrastructure.database import get_db
 from app.infrastructure.worker import create_worker_pool
+from fastapi.responses import FileResponse
+from app.features.media.processor import get_uploaded_file
 
 
 settings = get_settings()
@@ -263,3 +265,73 @@ async def attach_media_to_project(
     await db.refresh(media)
 
     return media
+
+
+@router.get("/{media_id}/file")
+async def get_media_file(
+    media_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Media).where(Media.id == media_id)
+    )
+
+    media = result.scalar_one_or_none()
+
+    if media is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Media not found",
+        )
+
+    file_path = get_uploaded_file(media.stored_filename)
+
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Media file not found",
+        )
+
+    return FileResponse(
+        path=file_path,
+        media_type=media.mime_type,
+        filename=media.original_filename,
+    )
+
+
+@router.get("/{media_id}/processed")
+async def get_processed_media(
+    media_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Media).where(Media.id == media_id)
+    )
+
+    media = result.scalar_one_or_none()
+
+    if media is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Media not found",
+        )
+
+    if not media.processed_filename:
+        raise HTTPException(
+            status_code=404,
+            detail="Processed media not available",
+        )
+
+    file_path = get_uploaded_file(media.processed_filename)
+
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Processed media file not found",
+        )
+
+    return FileResponse(
+        path=file_path,
+        media_type="video/mp4",
+        filename=media.processed_filename,
+    )
