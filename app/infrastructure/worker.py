@@ -1,12 +1,19 @@
 from arq import create_pool
 from arq.connections import RedisSettings
 
-from app.infrastructure.tasks import process_media_task
+from app.infrastructure.tasks import (
+    convert_media_task,
+    edit_media_task,
+    process_media_task,
+)
+
 
 
 class WorkerSettings:
     functions = [
         process_media_task,
+        convert_media_task,
+        edit_media_task,
     ]
 
     redis_settings = RedisSettings(
