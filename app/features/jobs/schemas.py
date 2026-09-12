@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -50,3 +51,19 @@ class JobStatusResponse(BaseModel):
         default=None,
         description="Error message if the job failed",
     )
+
+
+class ProcessingJobResponse(BaseModel):
+    job_id: str
+    media_id: str | None = None
+    media_version_id: str | None = None
+    task_name: str
+    status: str
+    progress: int = Field(default=0, ge=0, le=100)
+    stage: str | None = None
+    error: str | None = None
+    operation_type: str | None = None
+    retry_count: int = 0
+    enqueued_at: datetime | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None

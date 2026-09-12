@@ -9,18 +9,100 @@ from arq.jobs import Job, JobStatus
 from arq import create_pool
 from arq.connections import RedisSettings
 from app.core.config import get_settings
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-
-async def get_redis_pool() -> ArqRedis:
-    settings = get_settings()
-    return await create_pool(RedisSettings.from_dsn(settings.redis_url))
+from app.features.jobs.models import ProcessingJob, JobStatus as InternalJobStatus
+from app.features.jobs.schemas import ProcessingJobResponse
 
 logger = logging.getLogger(__name__)
+
+settings = get_settings()
 
 MEDIA_PROGRESS_PREFIX = "media:progress:"
 JOB_PROGRESS_PREFIX = "job:progress:"
 MEDIA_LAST_JOB_PREFIX = "media:last_job:"
-PROGRESS_TTL = 86400  # 24 hours retention in Redis
+PROGRESS_TTL = 86400
+
+
+async def get_redis_pool() -> ArqRedis:
+    return await create_pool(RedisSettings.from_dsn(settings.redis_url))
+
+
+async def create_processing_job(
+    db: AsyncSession,
+    media_id: UUID | None,
+    user_id: UUID | None,
+    task_name: str,
+    operation_type: str | None = None,
+    operation_params: dict | None = None,
+    arq_job_id: str | None = None,
+    input_filename: str | None = None,
+    output_filename: str | None = None,
+) -> ProcessingJob:
+    job = ProcessingJob(
+        media_id=media_id,
+        user_id=user_id,
+        task_name=task_name,
+        status=InternalJobStatus.queued,
+        progress=0,
+        operation_type=operation_type,
+        operation_params=str(operation_params) if operation_params else None,
+        arq_job_id=arq_job_id,
+        input_filename=input_filename,
+        output_filename=output_filename,
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+    return job
+
+
+async def get_processing_job(db: AsyncSession, job_id: UUID) -> ProcessingJob | None:
+    result = await db.execute(select(ProcessingJob).where(ProcessingJob.id == job_id))
+    return result.scalar_one_or_none()
+
+
+async def list_processing_jobs(db: AsyncSession, user_id: UUID | None = None) -> list[ProcessingJob]:
+    query = select(ProcessingJob)
+    if user_id is not None:
+        query = query.where(ProcessingJob.user_id == user_id)
+    query = query.order_by(ProcessingJob.created_at.desc())
+    result = await db.execute(query)
+    return list(result.scalars().all())
+
+
+async def update_processing_job(
+    db: AsyncSession,
+    job: ProcessingJob,
+    status: str | None = None,
+    progress: int | None = None,
+    stage: str | None = None,
+    error: str | None = None,
+    output_filename: str | None = None,
+    arq_job_id: str | None = None,
+) -> ProcessingJob:
+    if status is not None:
+        job.status = status
+    if progress is not None:
+        job.progress = progress
+    if stage is not None:
+        job.stage = stage
+    if error is not None:
+        job.error = error
+    if output_filename is not None:
+        job.output_filename = output_filename
+    if arq_job_id is not None:
+        job.arq_job_id = arq_job_id
+
+    if status == InternalJobStatus.running and job.started_at is None:
+        job.started_at = datetime.utcnow()
+    if status in (InternalJobStatus.completed, InternalJobStatus.failed, InternalJobStatus.cancelled):
+        job.finished_at = datetime.utcnow()
+
+    await db.commit()
+    await db.refresh(job)
+    return job
 
 
 async def set_processing_progress(
@@ -33,10 +115,6 @@ async def set_processing_progress(
     task_name: str | None = None,
     redis: ArqRedis | None = None,
 ) -> None:
-    """
-    Records real-time processing progress and status into Redis.
-    Fails safely without raising exceptions so task execution is never interrupted.
-    """
     media_id_str = str(media_id)
     should_close = False
     try:
@@ -75,7 +153,7 @@ async def set_processing_progress(
     finally:
         if should_close and redis is not None:
             try:
-                await redis.close()
+                await redis.aclose()
             except Exception:
                 pass
 
@@ -85,10 +163,6 @@ async def get_media_progress(
     db_media: Any = None,
     redis: ArqRedis | None = None,
 ) -> dict[str, Any]:
-    """
-    Fetches the combined processing status and progress for a given media ID.
-    Reconciles Redis real-time progress with PostgreSQL durable state.
-    """
     media_id_str = str(media_id)
     should_close = False
     redis_data: dict[str, str] = {}
@@ -120,7 +194,7 @@ async def get_media_progress(
     finally:
         if should_close and redis is not None:
             try:
-                await redis.close()
+                await redis.aclose()
             except Exception:
                 pass
 
@@ -128,7 +202,6 @@ async def get_media_progress(
     db_error = getattr(db_media, "processing_error", None)
     db_processed_filename = getattr(db_media, "processed_filename", None)
 
-    # Defaults
     status = "pending"
     progress = 0
     stage = None
@@ -144,7 +217,6 @@ async def get_media_progress(
         stage = redis_data.get("stage") or None
         error = redis_data.get("error") or None
 
-    # PostgreSQL database state is the authority on completion / final failure
     if db_status == "completed":
         status = "completed"
         progress = 100
@@ -178,22 +250,12 @@ async def get_job_status(
     job_id: str,
     redis: ArqRedis | None = None,
 ) -> dict[str, Any] | None:
-    """
-    Inspects ARQ job status and Redis progress cache to monitor job execution.
-    Answers:
-      - Did the job start?
-      - Is it still running?
-      - Did it finish?
-      - Did it fail?
-      - What media is it processing?
-    """
     should_close = False
     try:
         if redis is None:
             redis = await get_redis_pool()
             should_close = True
 
-        # Read cached progress hash from Redis
         raw_progress = await redis.hgetall(f"{JOB_PROGRESS_PREFIX}{job_id}")
         progress_data: dict[str, str] = {}
         if raw_progress:
@@ -204,7 +266,6 @@ async def get_job_status(
                 for k, v in raw_progress.items()
             }
 
-        # Inspect ARQ Job
         arq_job = Job(job_id, redis)
         job_status = await arq_job.status()
         job_info = await arq_job.info()
@@ -270,7 +331,6 @@ async def get_job_status(
                 stage = stage or "Processing completed"
                 success = True
         elif progress_data:
-            # Fallback to cached progress data if ARQ TTL has expired
             status = progress_data.get("status", "unknown")
 
         return {
@@ -293,15 +353,12 @@ async def get_job_status(
     finally:
         if should_close and redis is not None:
             try:
-                await redis.close()
+                await redis.aclose()
             except Exception:
                 pass
 
 
 async def list_queued_jobs(redis: ArqRedis | None = None) -> list[dict[str, Any]]:
-    """
-    Returns a list of currently queued jobs in ARQ.
-    """
     should_close = False
     try:
         if redis is None:
@@ -327,6 +384,6 @@ async def list_queued_jobs(redis: ArqRedis | None = None) -> list[dict[str, Any]
     finally:
         if should_close and redis is not None:
             try:
-                await redis.close()
+                await redis.aclose()
             except Exception:
                 pass
