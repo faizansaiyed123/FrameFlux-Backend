@@ -23,6 +23,7 @@ from app.features.auth.schemas import (
     ResetPasswordRequest,
     SignupRequest,
     TokenResponse,
+    UpdateProfileRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -212,5 +213,22 @@ async def change_password(
 
     user.password_hash = hash_password(request.new_password)
     await db.commit()
+
+
+async def update_profile(
+    db: AsyncSession,
+    user: User,
+    request: UpdateProfileRequest,
+) -> User:
+    if request.full_name is not None:
+        user.full_name = request.full_name
+    if request.avatar_url is not None:
+        user.avatar_url = request.avatar_url
+    if request.preferences is not None:
+        user.preferences = request.preferences
+
+    await db.commit()
+    await db.refresh(user)
+    return user
 
 

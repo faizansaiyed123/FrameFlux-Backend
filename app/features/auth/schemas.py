@@ -13,6 +13,8 @@ class UserResponse(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    avatar_url: str | None = None
+    preferences: str | None = None
 
 
 class SignupRequest(BaseModel):
@@ -43,6 +45,12 @@ class ResetPasswordRequest(BaseModel):
 
 class UpdateProfileRequest(BaseModel):
     full_name: str | None = Field(default=None, max_length=255)
+
+
+class UpdateProfileRequest(BaseModel):
+    full_name: str | None = Field(default=None, max_length=255)
+    avatar_url: str | None = Field(default=None, max_length=255)
+    preferences: str | None = Field(default=None, max_length=255)
 
 
 class ChangePasswordRequest(BaseModel):
