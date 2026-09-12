@@ -2,15 +2,21 @@ from uuid import UUID
 
 from sqlalchemy import select
 
-from app.features.media.conversion import convert_media
-from app.features.media.models import Media
+from app.features.media.conversion import compress_media, convert_media
+from app.features.media.models import Media, MediaVersion
 from app.features.media.processor import (
     get_uploaded_file,
     process_media,
 )
-from app.features.projects.models import Project  # registers projects table
+from app.features.projects.models import Project
+from app.features.jobs.models import ProcessingJob
+from app.features.jobs.service import (
+    create_processing_job,
+    update_processing_job,
+    set_processing_progress,
+)
 from app.infrastructure.database import AsyncSessionLocal
-from app.infrastructure.ffmpeg import get_video_info
+from app.infrastructure.ffmpeg import get_video_info, probe_media
 from app.features.media.editing import (
     add_image_overlay,
     add_text_overlay,
@@ -18,9 +24,88 @@ from app.features.media.editing import (
     freeze_frame,
     transform_media,
 )
+from app.features.media.engine import ProcessingEngine, ProcessingEngineError
+from app.features.media.schemas import ProcessingRequest
+from app.features.auth.models import User
+
+engine = ProcessingEngine()
 
 
-from app.features.jobs.service import set_processing_progress
+async def process_media_unified_task(
+    ctx,
+    media_id: str,
+    operations: list[dict],
+    job_id: str,
+    user_id: str | None = None,
+):
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Media).where(Media.id == UUID(media_id))
+        )
+        media = result.scalar_one_or_none()
+
+        if media is None:
+            return {
+                "media_id": media_id,
+                "status": "failed",
+                "error": "Media not found",
+            }
+
+        job = await create_processing_job(
+            db,
+            media_id=media.id,
+            user_id=UUID(user_id) if user_id else None,
+            task_name="process_media_unified_task",
+            operation_type="unified",
+            operation_params={"operations": operations},
+            arq_job_id=job_id,
+            input_filename=media.stored_filename,
+        )
+
+        try:
+            await update_processing_job(db, job, status="running", progress=10, stage="Initializing")
+            await set_processing_progress(media_id, "processing", 10, job_id=job_id, stage="Initializing", task_name="process_media_unified_task")
+
+            request = ProcessingRequest(media_id=media_id, operations=operations)
+
+            await update_processing_job(db, job, progress=25, stage="Running processing pipeline")
+            await set_processing_progress(media_id, "processing", 25, job_id=job_id, stage="Running processing pipeline", task_name="process_media_unified_task")
+
+            result = await engine.execute(request)
+
+            await update_processing_job(
+                db,
+                job,
+                status="completed",
+                progress=100,
+                stage="Processing completed",
+                output_filename=result.get("output_filename"),
+            )
+            await set_processing_progress(media_id, "completed", 100, job_id=job_id, stage="Processing completed", task_name="process_media_unified_task")
+
+            media.processed_filename = result.get("output_filename")
+            media.processing_status = "completed"
+            media.processing_error = None
+            await db.commit()
+
+            return result
+
+        except ProcessingEngineError as exc:
+            await db.rollback()
+            await update_processing_job(db, job, status="failed", error=str(exc)[:500])
+            await set_processing_progress(media_id, "failed", 0, job_id=job_id, error=str(exc)[:500], stage="Processing failed", task_name="process_media_unified_task")
+            media.processing_status = "failed"
+            media.processing_error = str(exc)[:500]
+            await db.commit()
+            return {"status": "failed", "error": str(exc)}
+        except Exception as exc:
+            await db.rollback()
+            await update_processing_job(db, job, status="failed", error=str(exc)[:500])
+            await set_processing_progress(media_id, "failed", 0, job_id=job_id, error=str(exc)[:500], stage="Processing failed", task_name="process_media_unified_task")
+            media.processing_status = "failed"
+            media.processing_error = str(exc)[:500]
+            await db.commit()
+            return {"status": "failed", "error": str(exc)}
 
 
 async def _update_progress(
@@ -209,6 +294,77 @@ async def convert_media_task(
                 "error": str(exc),
             }
 
+
+async def compress_media_task(
+    ctx,
+    media_id: str,
+    stored_filename: str,
+    output_filename: str,
+    options: dict,
+    target_size_mb: int | None = None,
+):
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Media).where(Media.id == UUID(media_id))
+        )
+
+        media = result.scalar_one_or_none()
+
+        if media is None:
+            return {
+                "media_id": media_id,
+                "status": "failed",
+                "error": "Media not found",
+            }
+
+        try:
+            media.processing_status = "processing"
+            media.processing_error = None
+            await db.commit()
+            await _update_progress(ctx, media_id, "processing", 15, stage="Initializing compression", task_name="compress_media_task")
+
+            input_path = get_uploaded_file(stored_filename)
+            output_path = get_uploaded_file(output_filename)
+
+            preset = options.get("compression_preset", "balanced")
+            stats = compress_media(
+                str(input_path),
+                str(output_path),
+                preset=preset,
+                target_size_mb=target_size_mb,
+            )
+
+            media.processed_filename = output_filename
+            media.processing_status = "completed"
+            media.processing_error = None
+            await db.commit()
+            await _update_progress(ctx, media_id, "completed", 100, stage="Compression completed", task_name="compress_media_task")
+
+            return {
+                "media_id": media_id,
+                "status": "completed",
+                "output_filename": output_filename,
+                "compression_stats": {
+                    "original_size": stats["original_size"],
+                    "processed_size": stats["processed_size"],
+                    "bytes_saved": stats["bytes_saved"],
+                    "percentage_saved": stats["percentage_saved"],
+                },
+            }
+
+        except Exception as exc:
+            await db.rollback()
+            media.processing_status = "failed"
+            media.processing_error = str(exc)[:500]
+            await db.commit()
+            await _update_progress(ctx, media_id, "failed", 0, stage="Compression failed", error=str(exc)[:500], task_name="compress_media_task")
+            return {
+                "media_id": media_id,
+                "status": "failed",
+                "error": str(exc),
+            }
+
+
 async def edit_media_task(
     ctx,
     media_id: str,
@@ -366,6 +522,7 @@ async def merge_media_task(
                 "status": "failed",
                 "error": str(exc),
             }
+
 
 async def transform_media_task(
     ctx,
@@ -652,6 +809,7 @@ async def overlay_media_task(
                 "error": str(exc),
             }
 
+
 async def split_media_task(
     ctx,
     media_id: str,
@@ -684,7 +842,6 @@ async def split_media_task(
             info = get_video_info(str(input_path))
             total_duration = info.get("duration", 0.0)
 
-            # Determine number of intervals
             valid_pts = [p for p in sorted(split_points) if 0 < p < total_duration]
             num_clips = len(valid_pts) + 1
 
@@ -695,7 +852,6 @@ async def split_media_task(
 
             split_media(str(input_path), split_points, output_paths)
 
-            # Store the first clip or comma-separated list as processed_filename
             media.processed_filename = output_filenames[0]
             media.processing_status = "completed"
             media.processing_error = None

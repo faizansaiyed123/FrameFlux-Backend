@@ -13,12 +13,23 @@ ALLOWED_EXTENSIONS = {
     ".mp3",
     ".wav",
     ".m4a",
+    ".aiff",
+    ".aif",
+    ".wma",
+    ".ogg",
+    ".flac",
+    ".opus",
     ".jpg",
     ".jpeg",
     ".png",
     ".webp",
+    ".gif",
+    ".bmp",
+    ".tiff",
+    ".tif",
     ".srt",
     ".vtt",
+    ".ass",
 }
 
 VIDEO_EXTENSIONS = {
@@ -33,6 +44,12 @@ AUDIO_EXTENSIONS = {
     ".mp3",
     ".wav",
     ".m4a",
+    ".aiff",
+    ".aif",
+    ".wma",
+    ".ogg",
+    ".flac",
+    ".opus",
 }
 
 IMAGE_EXTENSIONS = {
@@ -40,11 +57,16 @@ IMAGE_EXTENSIONS = {
     ".jpeg",
     ".png",
     ".webp",
+    ".gif",
+    ".bmp",
+    ".tiff",
+    ".tif",
 }
 
 SUBTITLE_EXTENSIONS = {
     ".srt",
     ".vtt",
+    ".ass",
 }
 
 # Mapping extensions to standard MIME types
@@ -54,15 +76,26 @@ EXTENSION_TO_MIME = {
     ".avi": "video/x-msvideo",
     ".mkv": "video/x-matroska",
     ".webm": "video/webm",
+    ".gif": "image/gif",
     ".mp3": "audio/mpeg",
     ".wav": "audio/wav",
     ".m4a": "audio/mp4",
+    ".aiff": "audio/aiff",
+    ".aif": "audio/aiff",
+    ".wma": "audio/x-ms-wma",
+    ".ogg": "audio/ogg",
+    ".flac": "audio/flac",
+    ".opus": "audio/opus",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".png": "image/png",
     ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".tiff": "image/tiff",
+    ".tif": "image/tiff",
     ".srt": "text/plain",
     ".vtt": "text/vtt",
+    ".ass": "text/plain",
 }
 
 # Recognized media MIME types
@@ -85,9 +118,17 @@ ALLOWED_MIME_TYPES = {
     "audio/x-m4a",
     "audio/aac",
     "audio/ogg",
+    "audio/aiff",
+    "audio/x-aiff",
+    "audio/x-ms-wma",
+    "audio/flac",
+    "audio/opus",
     "image/jpeg",
     "image/png",
     "image/webp",
+    "image/gif",
+    "image/bmp",
+    "image/tiff",
     "text/plain",
     "text/vtt",
     "application/x-subrip",
