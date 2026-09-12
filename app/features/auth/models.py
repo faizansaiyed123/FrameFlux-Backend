@@ -50,3 +50,13 @@ class User(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+    avatar_url: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    preferences: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
