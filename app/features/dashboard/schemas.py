@@ -22,6 +22,20 @@ class DashboardOverviewResponse(BaseModel):
     media_by_type: dict[str, int]
     processing_status_counts: dict[str, int]
     total_storage_used_bytes: int
+    storage_by_type: dict[str, int]
     recent_projects: list[RecentProjectItem]
     recent_media: list[MediaResponse]
     active_jobs_count: int
+
+
+class RecentProcessingItem(BaseModel):
+    job_id: str
+    media_id: str | None = None
+    task_name: str
+    status: str
+    progress: int
+    stage: str | None = None
+    error: str | None = None
+    enqueued_at: datetime | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None

@@ -3,8 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.features.auth.dependencies import get_current_active_user
 from app.features.auth.models import User
-from app.features.dashboard.schemas import DashboardOverviewResponse
-from app.features.dashboard.service import get_dashboard_overview
+from app.features.dashboard.schemas import DashboardOverviewResponse, RecentProcessingItem
+from app.features.dashboard.service import get_dashboard_overview, get_recent_processing
 from app.infrastructure.database import get_db
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
@@ -27,8 +27,22 @@ async def dashboard_overview(
     - media_by_type (video, audio, image)
     - processing_status_counts (pending, queued, processing, completed, failed)
     - total_storage_used_bytes
+    - storage_by_type
     - recent_projects (latest N, with media counts)
     - recent_media (latest N)
     - active_jobs_count
     """
     return await get_dashboard_overview(db, current_user.id, recent_limit=limit)
+
+
+@router.get(
+    "/recent-processing",
+    response_model=list[RecentProcessingItem],
+    summary="Get recent processing history for the current user",
+)
+async def recent_processing(
+    limit: int = Query(default=10, ge=1, le=100, description="Max recent processing items to return"),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await get_recent_processing(db, current_user.id, limit=limit)

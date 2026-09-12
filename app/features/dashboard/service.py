@@ -4,9 +4,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.features.projects.models import Project
 from app.features.media.models import Media
+from app.features.jobs.models import ProcessingJob
 from app.features.dashboard.schemas import (
     DashboardOverviewResponse,
     RecentProjectItem,
+    RecentProcessingItem,
 )
 from app.features.media.schemas import MediaResponse
 
@@ -48,7 +50,19 @@ async def get_dashboard_overview(
         if m_type:
             media_by_type[m_type] = count
 
-    # 4. Processing status counts
+    # 4. Storage by type
+    storage_by_type_stmt = (
+        select(Media.media_type, func.coalesce(func.sum(Media.file_size), 0))
+        .where(Media.user_id == user_id)
+        .group_by(Media.media_type)
+    )
+    storage_by_type_results = (await db.execute(storage_by_type_stmt)).all()
+    storage_by_type: dict[str, int] = {}
+    for m_type, size in storage_by_type_results:
+        if m_type:
+            storage_by_type[m_type] = int(size)
+
+    # 5. Processing status counts
     status_stmt = (
         select(Media.processing_status, func.count(Media.id))
         .where(Media.user_id == user_id)
@@ -66,14 +80,14 @@ async def get_dashboard_overview(
         if p_status:
             processing_status_counts[p_status] = count
 
-    # 5. Active jobs count: media in pending, queued, or processing status
+    # 6. Active jobs count: media in pending, queued, or processing status
     active_jobs_count = (
         processing_status_counts.get("pending", 0)
         + processing_status_counts.get("queued", 0)
         + processing_status_counts.get("processing", 0)
     )
 
-    # 6. Recent projects with media counts
+    # 7. Recent projects with media counts
     recent_projects_stmt = (
         select(
             Project,
@@ -99,7 +113,7 @@ async def get_dashboard_overview(
         for proj, m_count in recent_projects_res
     ]
 
-    # 7. Recent media
+    # 8. Recent media
     recent_media_stmt = (
         select(Media)
         .where(Media.user_id == user_id)
@@ -115,7 +129,38 @@ async def get_dashboard_overview(
         media_by_type=media_by_type,
         processing_status_counts=processing_status_counts,
         total_storage_used_bytes=total_storage_used_bytes,
+        storage_by_type=storage_by_type,
         recent_projects=recent_projects,
         recent_media=recent_media,
         active_jobs_count=active_jobs_count,
     )
+
+
+async def get_recent_processing(
+    db: AsyncSession,
+    user_id: UUID,
+    limit: int = 10,
+) -> list[RecentProcessingItem]:
+    stmt = (
+        select(ProcessingJob)
+        .where(ProcessingJob.user_id == user_id)
+        .order_by(ProcessingJob.created_at.desc())
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    jobs = result.scalars().all()
+    return [
+        RecentProcessingItem(
+            job_id=str(job.id),
+            media_id=str(job.media_id) if job.media_id else None,
+            task_name=job.task_name,
+            status=job.status,
+            progress=job.progress,
+            stage=job.stage,
+            error=job.error,
+            enqueued_at=job.enqueued_at,
+            started_at=job.started_at,
+            finished_at=job.finished_at,
+        )
+        for job in jobs
+    ]
