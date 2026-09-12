@@ -2,6 +2,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.features.media.models import Media
@@ -31,7 +32,6 @@ async def save_upload(file: UploadFile) -> Media:
     mime_type = validate_mime_type(file.content_type, extension)
     media_type = get_media_type(extension)
 
-    # Check reported size if provided
     if file.size is not None and file.size > max_size:
         raise HTTPException(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
@@ -81,6 +81,14 @@ async def save_upload(file: UploadFile) -> Media:
         file_size=file_size,
         processing_status="pending",
     )
+
+
+async def save_multiple_uploads(files: list[UploadFile]) -> list[Media]:
+    results: list[Media] = []
+    for file in files:
+        media = await save_upload(file)
+        results.append(media)
+    return results
 
 
 async def delete_media_file(stored_filename: str) -> None:

@@ -52,6 +52,27 @@ AUDIO_CODECS = {
     "wav": "pcm_s16le",
 }
 
+COMPRESSION_PRESETS = {
+    "low": {"crf": 18, "preset": "slow"},
+    "balanced": {"crf": 23, "preset": "medium"},
+    "maximum": {"crf": 28, "preset": "fast"},
+}
+
+FPS_PRESETS = {
+    "24": 24,
+    "25": 25,
+    "30": 30,
+    "50": 50,
+    "60": 60,
+}
+
+ASPECT_RATIO_PRESETS = {
+    "16:9": "16:9",
+    "9:16": "9:16",
+    "4:3": "4:3",
+    "1:1": "1:1",
+}
+
 
 def validate_aspect_ratio(ratio: str) -> str:
     """
@@ -96,6 +117,7 @@ def convert_media(
     aspect_ratio: str | None = None,
     audio_codec: str | None = None,
     audio_bitrate: str | None = None,
+    compression_preset: str | None = None,
 ) -> None:
     output_format = output_format.lower()
     if output_format not in SUPPORTED_FORMATS:
@@ -119,6 +141,14 @@ def convert_media(
 
     if audio_bitrate:
         kwargs["audio_bitrate"] = audio_bitrate
+
+    if compression_preset:
+        preset = COMPRESSION_PRESETS.get(compression_preset)
+        if preset:
+            kwargs["crf"] = preset["crf"]
+            kwargs["preset"] = preset["preset"]
+        else:
+            raise ValueError(f"Unsupported compression preset: {compression_preset}")
 
     if quality is not None:
         kwargs["crf"] = quality
@@ -159,3 +189,49 @@ def convert_media(
             else "FFmpeg conversion failed"
         )
         raise RuntimeError(error) from exc
+
+
+def compress_media(
+    input_path: str,
+    output_path: str,
+    preset: str = "balanced",
+    target_size_mb: int | None = None,
+) -> dict:
+    if not Path(input_path).exists():
+        raise FileNotFoundError(f"Media file not found: {input_path}")
+
+    original_size = Path(input_path).stat().st_size
+    kwargs: dict[str, Any] = {}
+
+    if preset not in COMPRESSION_PRESETS:
+        raise ValueError(f"Unsupported compression preset: {preset}")
+    settings = COMPRESSION_PRESETS[preset]
+    kwargs["crf"] = settings["crf"]
+    kwargs["preset"] = settings["preset"]
+
+    if target_size_mb is not None:
+        probe = ffmpeg.probe(input_path)
+        duration = float(probe["format"].get("duration", 0))
+        target_bits = target_size_mb * 8 * 1024 * 1024
+        video_bitrate = max(int((target_bits / duration) * 0.85), 100_000)
+        kwargs["video_bitrate"] = str(video_bitrate)
+
+    try:
+        (
+            ffmpeg
+            .input(input_path)
+            .output(output_path, vcodec="libx264", acodec="aac", movflags="+faststart", **kwargs)
+            .overwrite_output()
+            .run()
+        )
+    except ffmpeg.Error as exc:
+        error = exc.stderr.decode(errors="replace") if exc.stderr else "FFmpeg compression failed"
+        raise RuntimeError(error) from exc
+
+    processed_size = Path(output_path).stat().st_size
+    return {
+        "original_size": original_size,
+        "processed_size": processed_size,
+        "bytes_saved": original_size - processed_size,
+        "percentage_saved": round((original_size - processed_size) / original_size * 100, 2) if original_size > 0 else 0,
+    }
