@@ -14,6 +14,8 @@ from app.infrastructure.tasks import (
     split_media_task,
     clips_media_task,
     process_media_unified_task,
+    execute_workflow_task,
+    execute_batch_task,
 )
 
 settings = get_settings()
@@ -47,6 +49,8 @@ class WorkerSettings:
         split_media_task,
         clips_media_task,
         process_media_unified_task,
+        execute_workflow_task,
+        execute_batch_task,
     ]
 
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
