@@ -125,7 +125,7 @@ async def sync_subtitles(
             ffmpeg.input(str(input_path))
             .output(
                 str(output_path),
-                vf=f"subtitles={input_path}:si=0,setpts=PTS*{data.scale}+{data.offset_seconds}/TB",
+                vf=f"subtitles={subtitle_file}:si=0,setpts=PTS*{data.scale}+{data.offset_seconds}/TB",
                 vcodec="libx264",
                 acodec="aac",
                 movflags="+faststart",
