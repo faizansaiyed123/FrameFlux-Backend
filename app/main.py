@@ -36,15 +36,10 @@ app = FastAPI(
     title="FrameFlux API",
 )
 
-settings = get_settings()
-if settings.environment == "development":
-    allowed_origins = ["http://localhost:3000"]
-else:
-    allowed_origins = [settings.app_origin] if settings.app_origin else []
-
+# Always allow localhost:3000 for development frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=["http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -58,15 +53,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["referrer-policy"] = "strict-origin-when-cross-origin"
         return response
 
-
 app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 @app.get("/", include_in_schema=False)
