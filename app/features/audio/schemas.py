@@ -38,6 +38,19 @@ class AudioToVideoRequest(BaseModel):
     output_format: Literal["mp4", "webm"] = "mp4"
 
 
+class AudioVideoSyncRequest(BaseModel):
+    audio_path: str = Field(description="Stored filename of external audio file")
+    audio_offset: float = Field(default=0.0, description="Audio offset in seconds (positive = delay, negative = advance)")
+    video_duration: float | None = Field(default=None, gt=0, description="Limit video duration")
+    audio_duration: float | None = Field(default=None, gt=0, description="Limit audio duration")
+    fade_in: float | None = Field(default=None, ge=0, description="Fade in duration for external audio")
+    fade_out: float | None = Field(default=None, ge=0, description="Fade out duration for external audio")
+    volume: float = Field(default=1.0, ge=0.0, le=10.0, description="Volume multiplier for external audio")
+    mix: bool = Field(default=False, description="Mix with original audio instead of replacing")
+    mix_volume: float = Field(default=0.5, ge=0.0, le=1.0, description="Original audio volume when mixing")
+    output_format: Literal["mp4", "webm"] = "mp4"
+
+
 class BatchAudioExtractRequest(BaseModel):
     media_ids: list[UUID] = Field(min_length=1, max_length=50)
     format: str = "mp3"

@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
@@ -26,11 +27,13 @@ from app.features.audio.processor import (
     apply_fade,
     add_silence,
     create_video_from_audio,
+    sync_audio_video,
 )
 from app.features.audio.schemas import (
     AudioConvertRequest,
     AudioEditRequest,
     AudioToVideoRequest,
+    AudioVideoSyncRequest,
     BatchAudioExtractRequest,
     BatchAudioExtractResponse,
 )
@@ -74,7 +77,12 @@ async def extract_audio_endpoint(
         extract_kwargs["start"] = start
         extract_kwargs["end"] = end
 
-    extract_audio(str(input_path), str(output_path), **extract_kwargs)
+    await asyncio.to_thread(
+        extract_audio,
+        str(input_path),
+        str(output_path),
+        **extract_kwargs,
+    )
     return FileResponse(path=output_path, media_type=f"audio/{format}", filename=output_filename)
 
 
@@ -117,7 +125,7 @@ async def adjust_volume_endpoint(
     output_filename = f"{media_id}_volume_{uuid4().hex[:8]}.mp4"
     input_path = get_uploaded_file(media.stored_filename)
     output_path = Path(settings.processed_dir) / output_filename
-    adjust_volume(str(input_path), str(output_path), volume, fade_in, fade_out)
+    await asyncio.to_thread(adjust_volume, str(input_path), str(output_path), volume, fade_in, fade_out)
     return {"output_filename": output_filename}
 
 
@@ -139,7 +147,7 @@ async def replace_audio_endpoint(
     input_path = get_uploaded_file(media.stored_filename)
     audio_file = get_uploaded_file(audio_path)
     output_path = Path(settings.processed_dir) / output_filename
-    replace_audio(str(input_path), str(audio_file), str(output_path), fade_in, fade_out)
+    await asyncio.to_thread(replace_audio, str(input_path), str(audio_file), str(output_path), fade_in, fade_out)
     return {"output_filename": output_filename}
 
 
@@ -161,7 +169,8 @@ async def convert_audio_endpoint(
     input_path = get_uploaded_file(media.stored_filename)
     output_filename = f"{media_id}_converted_{uuid4().hex[:8]}.{data.format}"
     output_path = Path(settings.processed_dir) / output_filename
-    convert_audio(
+    await asyncio.to_thread(
+        convert_audio,
         str(input_path),
         str(output_path),
         format=data.format,
@@ -190,21 +199,21 @@ async def edit_audio_endpoint(
     output_path = Path(settings.processed_dir) / output_filename
 
     if data.operation == "trim" and data.start is not None and data.end is not None:
-        trim_audio(str(input_path), str(output_path), data.start, data.end)
+        await asyncio.to_thread(trim_audio, str(input_path), str(output_path), data.start, data.end)
     elif data.operation == "cut" and data.start is not None and data.end is not None:
-        cut_audio(str(input_path), str(output_path), data.start, data.end)
+        await asyncio.to_thread(cut_audio, str(input_path), str(output_path), data.start, data.end)
     elif data.operation == "split" and data.start is not None and data.end is not None:
-        split_audio(str(input_path), str(Path(settings.processed_dir) / f"{media_id}_split"), data.start, data.end)
+        await asyncio.to_thread(split_audio, str(input_path), str(Path(settings.processed_dir) / f"{media_id}_split"), data.start, data.end)
     elif data.operation == "merge" and data.target_files:
-        merge_audio(data.target_files, str(output_path))
+        await asyncio.to_thread(merge_audio, data.target_files, str(output_path))
     elif data.operation == "speed" and data.speed is not None:
-        change_audio_speed(str(input_path), str(output_path), data.speed)
+        await asyncio.to_thread(change_audio_speed, str(input_path), str(output_path), data.speed)
     elif data.operation == "normalize":
-        normalize_audio(str(input_path), str(output_path))
+        await asyncio.to_thread(normalize_audio, str(input_path), str(output_path))
     elif data.operation == "fade":
-        apply_fade(str(input_path), str(output_path), data.fade_in, data.fade_out)
+        await asyncio.to_thread(apply_fade, str(input_path), str(output_path), data.fade_in, data.fade_out)
     elif data.operation == "silence" and data.silence_duration is not None:
-        add_silence(str(input_path), str(output_path), data.silence_duration)
+        await asyncio.to_thread(add_silence, str(input_path), str(output_path), data.silence_duration)
     else:
         raise HTTPException(status_code=400, detail="Invalid operation or missing parameters")
 
@@ -230,7 +239,8 @@ async def audio_to_video_endpoint(
     bg_image = get_uploaded_file(data.background_image) if data.background_image else None
     watermark_path = get_uploaded_file(data.watermark) if data.watermark else None
 
-    create_video_from_audio(
+    await asyncio.to_thread(
+        create_video_from_audio,
         str(audio_path),
         str(output_path),
         background_image=bg_image,
@@ -245,5 +255,42 @@ async def audio_to_video_endpoint(
         aspect_ratio=data.aspect_ratio,
         duration=data.duration,
         output_format=data.output_format,
+    )
+    return FileResponse(path=output_path, media_type=f"video/{data.output_format}", filename=output_filename)
+
+
+@router.post("/{media_id}/sync-audio")
+async def sync_audio_video_endpoint(
+    media_id: UUID,
+    data: AudioVideoSyncRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Media).where(Media.id == media_id, Media.user_id == current_user.id))
+    media = result.scalar_one_or_none()
+    if media is None:
+        raise HTTPException(status_code=404, detail="Media not found")
+
+    if media.media_type != "video":
+        raise HTTPException(status_code=400, detail="Media must be a video file")
+
+    input_path = get_uploaded_file(media.stored_filename)
+    audio_file = get_uploaded_file(data.audio_path)
+    output_filename = f"{media_id}_synced_{uuid4().hex[:8]}.{data.output_format}"
+    output_path = Path(settings.processed_dir) / output_filename
+
+    await asyncio.to_thread(
+        sync_audio_video,
+        str(input_path),
+        str(audio_file),
+        str(output_path),
+        audio_offset=data.audio_offset,
+        video_duration=data.video_duration,
+        audio_duration=data.audio_duration,
+        fade_in=data.fade_in,
+        fade_out=data.fade_out,
+        volume=data.volume,
+        mix=data.mix,
+        mix_volume=data.mix_volume,
     )
     return FileResponse(path=output_path, media_type=f"video/{data.output_format}", filename=output_filename)

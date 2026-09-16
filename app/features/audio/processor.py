@@ -1,5 +1,6 @@
 import ffmpeg
 from pathlib import Path
+from typing import Optional
 
 
 def _run(stream):
@@ -8,6 +9,85 @@ def _run(stream):
     except ffmpeg.Error as exc:
         error = exc.stderr.decode(errors="replace") if exc.stderr else "FFmpeg operation failed"
         raise RuntimeError(error) from exc
+
+
+def sync_audio_video(
+    video_path: str,
+    audio_path: str,
+    output_path: str,
+    audio_offset: float = 0.0,
+    video_duration: Optional[float] = None,
+    audio_duration: Optional[float] = None,
+    fade_in: float | None = None,
+    fade_out: float | None = None,
+    volume: float = 1.0,
+    mix: bool = False,
+    mix_volume: float = 0.5,
+) -> None:
+    """
+    Sync external audio with video.
+    
+    Args:
+        video_path: Path to input video
+        audio_path: Path to external audio file
+        output_path: Path for output video
+        audio_offset: Audio offset in seconds (positive = delay audio, negative = advance audio)
+        video_duration: Optional video duration to limit output
+        audio_duration: Optional audio duration to limit output
+        fade_in: Fade in duration for external audio
+        fade_out: Fade out duration for external audio
+        volume: Volume multiplier for external audio
+        mix: If True, mix external audio with original video audio
+        mix_volume: Volume of original audio when mixing (0-1)
+    """
+    if not Path(video_path).exists():
+        raise FileNotFoundError(f"Video file not found: {video_path}")
+    if not Path(audio_path).exists():
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+
+    video = ffmpeg.input(video_path)
+    audio = ffmpeg.input(audio_path)
+
+    # Apply offset to audio
+    if audio_offset != 0:
+        if audio_offset > 0:
+            # Delay audio: add silence at start
+            silence = ffmpeg.input("anullsrc=r=44100:cl=stereo", f="lavfi", t=audio_offset)
+            audio = ffmpeg.concat(silence, audio, v=0, a=1)
+        else:
+            # Advance audio: trim from start
+            audio = audio.filter("atrim", start=-audio_offset)
+
+    # Apply duration limits
+    if audio_duration:
+        audio = audio.filter("atrim", duration=audio_duration)
+
+    # Apply volume to external audio
+    audio = audio.filter("volume", volume)
+
+    # Apply fade in/out to external audio
+    if fade_in:
+        audio = audio.filter("afade", t="in", st=0, d=fade_in)
+    if fade_out:
+        audio = audio.filter("afade", t="out", st=None, d=fade_out)
+
+    if mix:
+        # Mix external audio with original video audio
+        original_audio = video.audio.filter("volume", mix_volume)
+        mixed_audio = ffmpeg.filter([original_audio, audio], "amix", inputs=2, duration="longest")
+        output_audio = mixed_audio
+    else:
+        # Replace video audio entirely
+        output_audio = audio
+
+    # Apply video duration limit
+    if video_duration:
+        video = video.filter("trim", duration=video_duration)
+
+    _run(
+        ffmpeg.output(video.video, output_audio, output_path, vcodec="libx264", acodec="aac", movflags="+faststart", shortest=True)
+        .overwrite_output()
+    )
 
 
 def convert_audio(
