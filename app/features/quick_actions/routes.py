@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from app.features.auth.dependencies import get_current_active_user
 from app.features.auth.models import User
 from app.features.media.models import Media
 from app.infrastructure.database import get_db
-from app.features.media.routes import get_media_or_404
+from app.features.media.routes import get_media_or_404, enqueue_media_job, mark_processing_pending
 
 router = APIRouter(prefix="/quick-actions", tags=["Quick Actions"])
 
@@ -63,8 +63,62 @@ async def execute_quick_action(
     db: AsyncSession = Depends(get_db),
 ):
     media = await get_media_or_404(media_id, db, user_id=current_user.id)
-    return {
-        "media_id": str(media.id),
-        "action_id": action_id,
-        "status": "queued",
+
+    # Actions that have corresponding async tasks
+    task_actions = {
+        "convert": {"task": "convert_media_task", "format": "mp4"},
+        "compress": {"task": "compress_media_task", "format": "mp4"},
+        "trim": {"task": "edit_media_task", "operation": "trim", "format": "mp4"},
+        "cut": {"task": "edit_media_task", "operation": "cut", "format": "mp4"},
+        "crop": {"task": "transform_media_task", "operation": "crop", "format": "mp4"},
+        "resize": {"task": "transform_media_task", "operation": "resize", "format": "mp4"},
+        "rotate": {"task": "transform_media_task", "operation": "rotate", "format": "mp4"},
+        "remove-audio": {"task": "transform_media_task", "operation": "remove_audio", "format": "mp4"},
+        "split": {"task": "split_media_task", "format": "mp4"},
+        "merge": {"task": "merge_media_task", "format": "mp4"},
     }
+
+    # Actions that use synchronous audio endpoints (handled directly, not queued)
+    direct_actions = {
+        "extract-audio", "generate-thumbnail", "generate-preview",
+        "replace-audio", "add-subtitles", "create-gif",
+        "add-external-audio", "sync-audio",
+        "change-volume", "normalize", "fade-in", "fade-out",
+        "convert-to-video", "share", "download",
+    }
+
+    if action_id in task_actions:
+        action = task_actions[action_id]
+        task_name = action["task"]
+        output_format = action.get("format", "mp4")
+        output_filename = f"{media_id}_{action_id}_{uuid4().hex[:8]}.{output_format}"
+
+        options = {}
+        if "operation" in action:
+            options["operation"] = action["operation"]
+
+        job = await enqueue_media_job(
+            task_name,
+            str(media.id),
+            media.stored_filename,
+            output_filename,
+            options,
+        )
+        await mark_processing_pending(media, db)
+        return {
+            "media_id": str(media.id),
+            "action_id": action_id,
+            "status": "queued",
+            "job_id": job.job_id,
+            "output_filename": output_filename,
+        }
+
+    if action_id in direct_actions:
+        return {
+            "media_id": str(media.id),
+            "action_id": action_id,
+            "status": "direct",
+            "message": f"Use direct API endpoint for {action_id}",
+        }
+
+    raise HTTPException(status_code=400, detail=f"Unknown action: {action_id}")
