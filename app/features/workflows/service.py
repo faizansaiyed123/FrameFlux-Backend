@@ -1,4 +1,5 @@
 import json
+import uuid
 from uuid import UUID
 
 from sqlalchemy import select
@@ -6,6 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.features.workflows.models import Workflow
 from app.features.workflows.schemas import WorkflowCreate, WorkflowUpdate, WorkflowOperation
+from app.infrastructure.tasks import execute_workflow_task
+from app.infrastructure.worker import create_worker_pool
+from app.features.jobs.service import set_processing_progress
 
 
 async def create_workflow(db: AsyncSession, data: WorkflowCreate, user_id: UUID | None) -> Workflow:
@@ -54,10 +58,36 @@ async def delete_workflow(db: AsyncSession, workflow: Workflow) -> None:
 
 
 async def run_workflow(db: AsyncSession, workflow: Workflow, media_id: UUID) -> dict:
-    ops = json.loads(workflow.operations) if workflow.operations else []
+    # Create a job ID for tracking
+    job_id = str(uuid.uuid4())
+
+    # Enqueue the workflow execution task
+    pool = await create_worker_pool()
+    try:
+        arq_job = await pool.enqueue_job(
+            "execute_workflow_task",
+            str(workflow.id),
+            str(media_id),
+            job_id,
+            str(workflow.user_id) if workflow.user_id else None,
+        )
+        if arq_job:
+            await set_processing_progress(
+                media_id=str(media_id),
+                status="queued",
+                progress=0,
+                job_id=job_id,
+                stage="Workflow queued for execution",
+                task_name="execute_workflow_task",
+                redis=pool,
+            )
+    finally:
+        await pool.close()
+
     return {
         "workflow_id": str(workflow.id),
         "media_id": str(media_id),
-        "operations_count": len(ops),
+        "job_id": job_id,
+        "arq_job_id": arq_job.job_id if arq_job else None,
         "status": "queued",
     }
