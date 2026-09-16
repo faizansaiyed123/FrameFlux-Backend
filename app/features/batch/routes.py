@@ -2,9 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
+import json
 
 from app.features.auth.dependencies import get_current_active_user
 from app.features.auth.models import User
+from app.features.jobs.models import ProcessingJob
 from app.infrastructure.database import get_db
 from app.features.batch.schemas import BatchUploadRequest, BatchUploadResponse, BatchOperationRequest, BatchOperationResponse, BatchResultResponse
 from app.features.batch.service import get_batch_media, create_batch_job
@@ -47,28 +49,49 @@ async def get_batch_status(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    from app.features.jobs.models import ProcessingJob
-    import json
     result = await db.execute(select(ProcessingJob).where(ProcessingJob.id == UUID(job_id)))
     job = result.scalar_one_or_none()
     if job is None:
         raise HTTPException(status_code=404, detail="Batch job not found")
 
-    operation_params = {}
+    completed = 0
+    failed = 0
     if job.operation_params:
-        if isinstance(job.operation_params, dict):
-            operation_params = job.operation_params
-        else:
-            try:
-                operation_params = json.loads(job.operation_params)
-            except (json.JSONDecodeError, TypeError):
-                pass
+        try:
+            params = json.loads(job.operation_params) if isinstance(job.operation_params, str) else job.operation_params
+            media_count = params.get("media_count", 0)
+        except (json.JSONDecodeError, TypeError):
+            media_count = 0
+    else:
+        media_count = 0
+
+    if media_count > 0:
+        job_results = await db.execute(
+            select(ProcessingJob).where(
+                ProcessingJob.operation_type == "batch",
+                ProcessingJob.created_at >= job.created_at,
+                ProcessingJob.created_at <= (job.finished_at or job.created_at),
+            )
+        )
+        related = job_results.scalars().all()
+        for related_job in related:
+            if related_job.status == "completed":
+                completed += 1
+            elif related_job.status == "failed":
+                failed += 1
+    else:
+        all_jobs = await db.execute(select(ProcessingJob).where(ProcessingJob.user_id == current_user.id))
+        for j in all_jobs.scalars().all():
+            if j.status == "completed":
+                completed += 1
+            elif j.status == "failed":
+                failed += 1
 
     return BatchResultResponse(
         job_id=job_id,
         status=job.status,
-        total=operation_params.get("media_count", 0),
-        completed=0,
-        failed=0,
+        total=media_count or 1,
+        completed=completed,
+        failed=failed,
         results=[],
     )
