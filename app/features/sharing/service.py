@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.features.sharing.models import ShareLink
 from app.features.sharing.schemas import ShareCreate
+from app.core.config import get_settings
 
 
 async def create_share_link(db: AsyncSession, data: ShareCreate, user_id: UUID | None) -> ShareLink:
@@ -20,6 +21,7 @@ async def create_share_link(db: AsyncSession, data: ShareCreate, user_id: UUID |
         password=data.password,
         expires_at=expires_at,
         allow_download=data.allow_download,
+        allowed_domains=data.allowed_domains,
     )
     db.add(share)
     await db.commit()
@@ -47,3 +49,42 @@ async def disable_share_link(db: AsyncSession, share: ShareLink) -> ShareLink:
     await db.commit()
     await db.refresh(share)
     return share
+
+
+async def increment_view_count(db: AsyncSession, share: ShareLink) -> None:
+    share.view_count += 1
+    await db.commit()
+
+
+async def check_domain_allowed(share: ShareLink, referer: str | None) -> bool:
+    if not share.allowed_domains:
+        return True
+    if not referer:
+        return False
+    from urllib.parse import urlparse
+    try:
+        domain = urlparse(referer).netloc
+        allowed = [d.strip() for d in share.allowed_domains.split(",")]
+        return any(domain == a or domain.endswith("." + a) for a in allowed)
+    except Exception:
+        return False
+
+
+async def get_embed_info(db: AsyncSession, token: str) -> dict | None:
+    share = await get_share_link(db, token)
+    if share is None or not share.is_active:
+        return None
+    from app.features.media.models import Media
+    result = await db.execute(select(Media).where(Media.id == share.media_id))
+    media = result.scalar_one_or_none()
+    if media is None:
+        return None
+    settings = get_settings()
+    base_url = settings.api_base_url or "http://localhost:8000"
+    embed_url = f"{base_url}/sharing/embed/{token}"
+    embed_code = f'<iframe src="{embed_url}" width="640" height="360" frameborder="0" allowfullscreen></iframe>'
+    return {
+        "embed_url": embed_url,
+        "embed_code": embed_code,
+        "media_title": media.original_filename,
+    }

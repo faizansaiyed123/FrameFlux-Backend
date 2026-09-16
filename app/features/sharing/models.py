@@ -20,4 +20,6 @@ class ShareLink(Base):
     expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
     is_active: Mapped[bool] = mapped_column(nullable=False, server_default="true")
     allow_download: Mapped[bool] = mapped_column(nullable=False, server_default="true")
+    view_count: Mapped[int] = mapped_column(nullable=False, server_default="0")
+    allowed_domains: Mapped[str | None] = mapped_column(Text, nullable=True)  # Comma-separated list of allowed domains
     created_at: Mapped[datetime] = mapped_column(server_default=sa.text("now()"), nullable=False)

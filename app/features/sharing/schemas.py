@@ -8,6 +8,7 @@ class ShareCreate(BaseModel):
     password: str | None = None
     expires_in_hours: int | None = None
     allow_download: bool = True
+    allowed_domains: str | None = None  # Comma-separated list of allowed domains for embed
 
 
 class ShareResponse(BaseModel):
@@ -20,4 +21,12 @@ class ShareResponse(BaseModel):
     expires_at: datetime | None
     is_active: bool
     allow_download: bool
+    view_count: int
+    allowed_domains: str | None
     created_at: datetime
+
+
+class EmbedResponse(BaseModel):
+    embed_url: str
+    embed_code: str
+    media_title: str
