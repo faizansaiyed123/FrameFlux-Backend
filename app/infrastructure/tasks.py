@@ -1,3 +1,5 @@
+import asyncio
+from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import select
@@ -8,6 +10,7 @@ from app.features.media.processor import (
     get_uploaded_file,
     process_media,
 )
+from app.features.audio.processor import convert_audio as audio_convert_audio
 from app.features.projects.models import Project
 from app.features.jobs.models import ProcessingJob
 from app.features.jobs.service import (
@@ -1448,3 +1451,102 @@ def _map_batch_operation(operation: str, options: dict) -> list[dict]:
         })
 
     return processing_ops
+
+
+async def convert_audio_task(
+    ctx,
+    media_id: str,
+    stored_filename: str,
+    output_filename: str,
+    options: dict,
+):
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Media).where(Media.id == UUID(media_id))
+        )
+
+        media = result.scalar_one_or_none()
+
+        if media is None:
+            return {
+                "media_id": media_id,
+                "status": "failed",
+                "error": "Media not found",
+            }
+
+        try:
+            media.processing_status = "processing"
+            media.processing_error = None
+            await db.commit()
+            await _update_progress(ctx, media_id, "processing", 15, stage="Initializing audio conversion", task_name="convert_audio_task")
+
+            input_path = get_uploaded_file(stored_filename)
+            output_path = get_uploaded_file(output_filename)
+
+            format = options.get("format", "mp3")
+            bitrate = options.get("bitrate")
+            sample_rate = options.get("sample_rate")
+            channels = options.get("channels")
+            quality = options.get("quality")
+
+            await asyncio.to_thread(
+                audio_convert_audio,
+                str(input_path),
+                str(output_path),
+                format=format,
+                bitrate=bitrate,
+                sample_rate=sample_rate,
+                channels=channels,
+                quality=quality,
+            )
+
+            # Create version
+            file_size = Path(output_path).stat().st_size if Path(output_path).exists() else 0
+            
+            result = await db.execute(
+                select(MediaVersion).where(MediaVersion.media_id == UUID(media_id)).order_by(MediaVersion.version_number.desc())
+            )
+            last_version = result.scalars().first()
+            version_number = (last_version.version_number + 1) if last_version else 1
+            
+            version = MediaVersion(
+                media_id=UUID(media_id),
+                version_number=version_number,
+                label=f"Audio Convert ({format})",
+                stored_filename=output_filename,
+                original_filename=media.original_filename,
+                file_size=file_size,
+                mime_type=f"audio/{format}",
+                duration=media.duration,
+                audio_codec=format,
+                processing_status="completed",
+            )
+            
+            db.add(version)
+            media.processed_filename = output_filename
+            media.processing_status = "completed"
+            media.processing_error = None
+
+            await db.commit()
+            await _update_progress(ctx, media_id, "completed", 100, stage="Audio conversion completed", task_name="convert_audio_task")
+
+            return {
+                "media_id": media_id,
+                "status": "completed",
+                "output_filename": output_filename,
+            }
+
+        except Exception as exc:
+            await db.rollback()
+
+            media.processing_status = "failed"
+            media.processing_error = str(exc)[:500]
+
+            await db.commit()
+            await _update_progress(ctx, media_id, "failed", 0, stage="Audio conversion failed", error=str(exc)[:500], task_name="convert_audio_task")
+
+            return {
+                "media_id": media_id,
+                "status": "failed",
+                "error": str(exc),
+            }

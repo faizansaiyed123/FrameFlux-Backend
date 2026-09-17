@@ -5,7 +5,8 @@ from sqlalchemy import engine_from_config, pool
 
 from app.core.config import get_settings
 from app.features.auth.models import User
-from app.features.media.models import Media
+from app.features.media.models import Media, MediaVersion
+from app.features.jobs.models import ProcessingJob
 from app.features.projects.models import Project
 from app.infrastructure.database import Base
 
@@ -15,7 +16,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Import all models so Alembic registers every table with SQLAlchemy metadata.
-_ = (User, Media, Project)
+_ = (User, Media, MediaVersion, ProcessingJob, Project)
 
 target_metadata = Base.metadata
 

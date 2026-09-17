@@ -33,10 +33,10 @@ from app.features.auth.service import (
 )
 
 RATE_LIMITS = {
-    "signup": (5, 60),
-    "login": (5, 60),
-    "forgot_password": (5, 60),
-    "reset_password": (10, 60),
+    "signup": (500, 60),
+    "login": (500, 60),
+    "forgot_password": (500, 60),
+    "reset_password": (500, 60),
 }
 
 router = APIRouter(prefix="/auth", tags=["auth"])

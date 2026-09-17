@@ -1125,3 +1125,94 @@ async def restore_media_version(
     await db.commit()
     await db.refresh(media)
     return media
+
+
+@router.get("/{media_id}/versions/{version_id}/download")
+async def download_media_version(
+    media_id: UUID,
+    version_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
+    result = await db.execute(select(MediaVersion).where(MediaVersion.id == version_id, MediaVersion.media_id == media_id))
+    version = result.scalar_one_or_none()
+    if version is None:
+        raise HTTPException(status_code=404, detail="Version not found")
+    file_path = get_uploaded_file(version.stored_filename)
+    settings = get_settings()
+    safe_path = verify_file_path_safety(file_path, Path(settings.upload_dir))
+    return FileResponse(path=safe_path, media_type=version.mime_type, filename=version.original_filename)
+
+
+@router.post("/{media_id}/versions")
+async def create_media_version(
+    media_id: UUID,
+    data: dict,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a new version for a media file."""
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
+    
+    stored_filename = data.get("stored_filename")
+    label = data.get("label", "Processed")
+    file_size = data.get("file_size")
+    mime_type = data.get("mime_type", media.mime_type)
+    duration = data.get("duration")
+    width = data.get("width")
+    height = data.get("height")
+    video_codec = data.get("video_codec")
+    audio_codec = data.get("audio_codec")
+    fps = data.get("fps")
+    
+    if not stored_filename or file_size is None:
+        raise HTTPException(status_code=400, detail="stored_filename and file_size are required")
+    
+    # Get the next version number
+    result = await db.execute(
+        select(MediaVersion).where(MediaVersion.media_id == media_id).order_by(MediaVersion.version_number.desc())
+    )
+    last_version = result.scalars().first()
+    version_number = (last_version.version_number + 1) if last_version else 1
+    
+    # Get file info
+    file_path = Path(settings.processed_dir) / stored_filename
+    if not file_path.exists():
+        # Try uploads dir
+        file_path = Path(settings.upload_dir) / stored_filename
+    
+    if file_path.exists():
+        actual_size = file_path.stat().st_size
+    else:
+        actual_size = file_size
+    
+    version = MediaVersion(
+        media_id=media_id,
+        version_number=version_number,
+        label=label,
+        stored_filename=stored_filename,
+        original_filename=media.original_filename,
+        file_size=actual_size,
+        mime_type=mime_type,
+        duration=duration,
+        width=width,
+        height=height,
+        video_codec=video_codec,
+        audio_codec=audio_codec,
+        fps=fps,
+        processing_status="completed",
+    )
+    
+    db.add(version)
+    await db.commit()
+    await db.refresh(version)
+    
+    return {
+        "id": str(version.id),
+        "version_number": version.version_number,
+        "label": version.label,
+        "stored_filename": version.stored_filename,
+        "processing_status": version.processing_status,
+        "created_at": version.created_at.isoformat(),
+    }

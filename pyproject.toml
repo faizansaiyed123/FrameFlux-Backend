@@ -24,4 +24,6 @@ dependencies = [
     "httpx>=0.28.1",
     "pytest>=9.1.1",
     "email-validator>=2.3.0",
+    "pillow>=12.3.0",
+    "aiofiles>=25.1.0",
 ]

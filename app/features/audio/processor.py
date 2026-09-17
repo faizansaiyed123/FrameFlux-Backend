@@ -116,7 +116,7 @@ def convert_audio(
     if not acodec:
         raise ValueError(f"Unsupported audio format: {format}")
 
-    kwargs: dict = {"acodec": acodec, "vn": True}
+    kwargs: dict = {"acodec": acodec, "vn": None}
     if bitrate:
         kwargs["audio_bitrate"] = bitrate
     if sample_rate:

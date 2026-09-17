@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,13 +11,44 @@ from app.core.config import get_settings
 settings = get_settings()
 from app.features.auth.dependencies import get_current_active_user
 from app.features.auth.models import User
-from app.features.media.models import Media
+from app.features.media.models import Media, MediaVersion
 from app.infrastructure.database import get_db
 from app.features.media.processor import get_uploaded_file
 from app.features.subtitles.service import burn_subtitles_into_video, extract_subtitle_track, mux_soft_subtitles
 from app.features.subtitles.schemas import SubtitleBurnRequest, SubtitleSyncRequest, SubtitleEditRequest, SubtitleTrackResponse
 
 router = APIRouter(prefix="/subtitles", tags=["Subtitles"])
+
+
+@router.post("/upload")
+async def upload_subtitle_file(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_active_user),
+):
+    import aiofiles
+    from app.core.config import get_settings
+    settings = get_settings()
+    
+    # Validate file extension
+    allowed_extensions = {'.srt', '.ass', '.vtt', '.sub', '.txt'}
+    file_ext = Path(file.filename).suffix.lower() if file.filename else ''
+    if file_ext not in allowed_extensions:
+        raise HTTPException(status_code=400, detail=f"Unsupported subtitle format. Allowed: {allowed_extensions}")
+    
+    # Generate unique filename
+    unique_filename = f"{uuid4().hex}{file_ext}"
+    file_path = Path(settings.upload_dir) / unique_filename
+    
+    # Save file
+    async with aiofiles.open(file_path, 'wb') as f:
+        content = await file.read()
+        await f.write(content)
+    
+    return {
+        "filename": unique_filename,
+        "original_filename": file.filename,
+        "size": len(content),
+    }
 
 
 @router.post("/{media_id}/burn")
@@ -51,8 +82,68 @@ async def burn_subtitles_endpoint(
         font=font,
         alignment=alignment,
     )
-    full_path = Path(settings.processed_dir) / rel_path
-    return FileResponse(path=full_path, media_type="video/mp4", filename=full_path.name)
+    output_filename = Path(rel_path).name
+    full_path = Path(settings.processed_dir) / output_filename
+    
+    # Get file size
+    file_size = full_path.stat().st_size if full_path.exists() else 0
+    
+    # Get video info using ffprobe
+    try:
+        probe = ffmpeg.probe(str(full_path))
+        video_stream = next((s for s in probe["streams"] if s["codec_type"] == "video"), None)
+        audio_stream = next((s for s in probe["streams"] if s["codec_type"] == "audio"), None)
+        
+        duration = float(probe["format"].get("duration", 0)) if probe["format"].get("duration") else None
+        width = video_stream.get("width") if video_stream else None
+        height = video_stream.get("height") if video_stream else None
+        video_codec = video_stream.get("codec_name") if video_stream else None
+        audio_codec = audio_stream.get("codec_name") if audio_stream else None
+        fps = eval(video_stream.get("r_frame_rate", "0")) if video_stream and video_stream.get("r_frame_rate") else None
+    except Exception:
+        duration = None
+        width = None
+        height = None
+        video_codec = None
+        audio_codec = None
+        fps = None
+    
+    # Get next version number
+    result = await db.execute(
+        select(MediaVersion).where(MediaVersion.media_id == media_id).order_by(MediaVersion.version_number.desc())
+    )
+    last_version = result.scalars().first()
+    version_number = (last_version.version_number + 1) if last_version else 1
+    
+    version = MediaVersion(
+        media_id=media_id,
+        version_number=version_number,
+        label=f"Burned Subtitles ({font_size}pt, {position})",
+        stored_filename=output_filename,
+        original_filename=media.original_filename,
+        file_size=file_size,
+        mime_type="video/mp4",
+        duration=duration,
+        width=width,
+        height=height,
+        video_codec=video_codec,
+        audio_codec=audio_codec,
+        fps=str(fps) if fps else None,
+        processing_status="completed",
+    )
+    
+    db.add(version)
+    await db.commit()
+    await db.refresh(version)
+    
+    return {
+        "id": str(version.id),
+        "version_number": version.version_number,
+        "label": version.label,
+        "stored_filename": version.stored_filename,
+        "processing_status": version.processing_status,
+        "created_at": version.created_at.isoformat(),
+    }
 
 
 @router.post("/{media_id}/mux")

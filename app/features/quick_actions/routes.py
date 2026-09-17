@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID, uuid4
@@ -8,6 +9,13 @@ from app.features.auth.models import User
 from app.features.media.models import Media
 from app.infrastructure.database import get_db
 from app.features.media.routes import get_media_or_404, enqueue_media_job, mark_processing_pending
+from app.features.media.processor import get_uploaded_file
+from app.features.audio.processor import convert_audio
+from app.core.config import get_settings
+from pathlib import Path
+import asyncio
+
+settings = get_settings()
 
 router = APIRouter(prefix="/quick-actions", tags=["Quick Actions"])
 
@@ -52,6 +60,15 @@ async def get_quick_actions(
             {"id": "download", "label": "Download", "icon": "download"},
             {"id": "share", "label": "Share", "icon": "share"},
         ],
+        "image": [
+            {"id": "convert", "label": "Convert", "icon": "swap_horiz"},
+            {"id": "compress", "label": "Compress", "icon": "compress"},
+            {"id": "resize", "label": "Resize", "icon": "photo_size_select_large"},
+            {"id": "crop", "label": "Crop", "icon": "crop"},
+            {"id": "rotate", "label": "Rotate", "icon": "rotate_90_degrees_ccw"},
+            {"id": "download", "label": "Download", "icon": "download"},
+            {"id": "share", "label": "Share", "icon": "share"},
+        ],
     }
 
 
@@ -64,8 +81,8 @@ async def execute_quick_action(
 ):
     media = await get_media_or_404(media_id, db, user_id=current_user.id)
 
-    # Actions that have corresponding async tasks
-    task_actions = {
+    # Video actions that have corresponding async tasks
+    video_task_actions = {
         "convert": {"task": "convert_media_task", "format": "mp4"},
         "compress": {"task": "compress_media_task", "format": "mp4"},
         "trim": {"task": "edit_media_task", "operation": "trim", "format": "mp4"},
@@ -78,47 +95,96 @@ async def execute_quick_action(
         "merge": {"task": "merge_media_task", "format": "mp4"},
     }
 
-    # Actions that use synchronous audio endpoints (handled directly, not queued)
-    direct_actions = {
-        "extract-audio", "generate-thumbnail", "generate-preview",
-        "replace-audio", "add-subtitles", "create-gif",
-        "add-external-audio", "sync-audio",
+    # Audio actions that use direct synchronous endpoints
+    audio_direct_actions = {
+        "compress", "trim", "cut", "split", "merge",
         "change-volume", "normalize", "fade-in", "fade-out",
         "convert-to-video", "share", "download",
     }
 
-    if action_id in task_actions:
-        action = task_actions[action_id]
-        task_name = action["task"]
-        output_format = action.get("format", "mp4")
-        output_filename = f"{media_id}_{action_id}_{uuid4().hex[:8]}.{output_format}"
+    # Video actions that use direct synchronous endpoints
+    video_direct_actions = {
+        "extract-audio", "generate-thumbnail", "generate-preview",
+        "replace-audio", "add-subtitles", "create-gif",
+        "add-external-audio", "sync-audio",
+        "share", "download",
+    }
 
-        options = {}
-        if "operation" in action:
-            options["operation"] = action["operation"]
+    # Image actions that use direct synchronous endpoints
+    image_direct_actions = {
+        "convert", "compress", "resize", "crop", "rotate",
+        "share", "download",
+    }
 
-        job = await enqueue_media_job(
-            task_name,
-            str(media.id),
-            media.stored_filename,
-            output_filename,
-            options,
-        )
-        await mark_processing_pending(media, db)
-        return {
-            "media_id": str(media.id),
-            "action_id": action_id,
-            "status": "queued",
-            "job_id": job.job_id,
-            "output_filename": output_filename,
-        }
+    if media.media_type == "video":
+        if action_id in video_task_actions:
+            action = video_task_actions[action_id]
+            task_name = action["task"]
+            output_format = action.get("format", "mp4")
+            output_filename = f"{media_id}_{action_id}_{uuid4().hex[:8]}.{output_format}"
 
-    if action_id in direct_actions:
-        return {
-            "media_id": str(media.id),
-            "action_id": action_id,
-            "status": "direct",
-            "message": f"Use direct API endpoint for {action_id}",
-        }
+            options = {}
+            if "operation" in action:
+                options["operation"] = action["operation"]
 
-    raise HTTPException(status_code=400, detail=f"Unknown action: {action_id}")
+            job = await enqueue_media_job(
+                task_name,
+                str(media.id),
+                media.stored_filename,
+                output_filename,
+                options,
+            )
+            await mark_processing_pending(media, db)
+            return {
+                "media_id": str(media.id),
+                "action_id": action_id,
+                "status": "queued",
+                "job_id": job.job_id,
+                "output_filename": output_filename,
+            }
+
+        if action_id in video_direct_actions:
+            return {
+                "media_id": str(media.id),
+                "action_id": action_id,
+                "status": "direct",
+                "message": f"Use direct API endpoint for {action_id}",
+            }
+
+    elif media.media_type == "audio":
+        if action_id == "convert":
+            output_filename = f"{media_id}_{action_id}_{uuid4().hex[:8]}.wav"
+            job = await enqueue_media_job(
+                "convert_audio_task",
+                str(media.id),
+                media.stored_filename,
+                output_filename,
+                {"format": "wav"},
+            )
+            await mark_processing_pending(media, db)
+            return {
+                "media_id": str(media.id),
+                "action_id": action_id,
+                "status": "queued",
+                "job_id": job.job_id,
+                "output_filename": output_filename,
+            }
+
+        if action_id in audio_direct_actions:
+            return {
+                "media_id": str(media.id),
+                "action_id": action_id,
+                "status": "direct",
+                "message": f"Use direct API endpoint for {action_id}",
+            }
+
+    elif media.media_type == "image":
+        if action_id in image_direct_actions:
+            return {
+                "media_id": str(media.id),
+                "action_id": action_id,
+                "status": "direct",
+                "message": f"Use direct API endpoint for {action_id}",
+            }
+
+    raise HTTPException(status_code=400, detail=f"Unknown action: {action_id} for media type: {media.media_type}")
