@@ -85,7 +85,7 @@ def sync_audio_video(
         video = video.filter("trim", duration=video_duration)
 
     _run(
-        ffmpeg.output(video.video, output_audio, output_path, vcodec="libx264", acodec="aac", movflags="+faststart", shortest=True)
+        ffmpeg.output(video.video, output_audio, output_path, vcodec="libx264", acodec="aac", movflags="+faststart", shortest=None)
         .overwrite_output()
     )
 
