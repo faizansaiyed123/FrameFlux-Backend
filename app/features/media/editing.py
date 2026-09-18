@@ -306,17 +306,28 @@ def transform_media(
             "atempo",
             speed,
         )
+    elif operation == "remove_audio":
+        # Remove the audio stream while preserving the video.
+        pass
     else:
         raise ValueError(f"Unsupported transform: {operation}")
 
-    output = ffmpeg.output(
-        video,
-        audio,
-        output_path,
-        vcodec="libx264",
-        acodec="aac",
-        movflags="+faststart",
-    )
+    if operation == "remove_audio":
+        output = ffmpeg.output(
+            video,
+            output_path,
+            vcodec="libx264",
+            movflags="+faststart",
+        )
+    else:
+        output = ffmpeg.output(
+            video,
+            audio,
+            output_path,
+            vcodec="libx264",
+            acodec="aac",
+            movflags="+faststart",
+        )
     _run(output)
 
 
