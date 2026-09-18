@@ -80,5 +80,5 @@ def replace_audio(input_path: str, audio_path: str, output_path: str, fade_in: f
     if fade_out:
         audio = audio.filter("afade", t="out", st=None, d=fade_out)
 
-    output = ffmpeg.output(video.video, audio, output_path, vcodec="libx264", acodec="aac", movflags="+faststart", shortest=True)
+    output = ffmpeg.output(video.video, audio, output_path, vcodec="libx264", acodec="aac", movflags="+faststart", shortest=None)
     _run(output)
