@@ -205,7 +205,8 @@ async def edit_audio_endpoint(
     elif data.operation == "split" and data.start is not None and data.end is not None:
         await asyncio.to_thread(split_audio, str(input_path), str(Path(settings.processed_dir) / f"{media_id}_split"), data.start, data.end)
     elif data.operation == "merge" and data.target_files:
-        await asyncio.to_thread(merge_audio, data.target_files, str(output_path))
+        target_paths = [str(get_uploaded_file(filename)) for filename in data.target_files]
+        await asyncio.to_thread(merge_audio, target_paths, str(output_path))
     elif data.operation == "speed" and data.speed is not None:
         await asyncio.to_thread(change_audio_speed, str(input_path), str(output_path), data.speed)
     elif data.operation == "normalize":
