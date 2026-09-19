@@ -4,7 +4,7 @@ from typing import Literal
 
 
 class AudioConvertRequest(BaseModel):
-    format: Literal["mp3", "wav", "aac", "flac", "ogg", "m4a", "opus", "aiff"] = "mp3"
+    format: Literal["mp3", "wav", "aac", "flac", "ogg", "m4a", "opus", "aiff", "wma"] = "mp3"
     bitrate: str | None = Field(default=None, description="Audio bitrate, e.g. 192k")
     sample_rate: int | None = Field(default=None, ge=8000, le=384000, description="Sample rate in Hz")
     channels: Literal[1, 2] | None = Field(default=None, description="1=mono, 2=stereo")
