@@ -130,14 +130,21 @@ def convert_media(
 
     # Resolve audio codec
     resolved_acodec = format_settings["acodec"]
+    disable_audio = False
     if audio_codec:
         normalized_acodec = audio_codec.lower().strip()
-        resolved_acodec = AUDIO_CODECS.get(normalized_acodec, normalized_acodec)
+        if normalized_acodec in {"none", "noaudio", "no-audio", "disabled"}:
+            disable_audio = True
+        else:
+            resolved_acodec = AUDIO_CODECS.get(normalized_acodec, normalized_acodec)
 
     kwargs: dict[str, Any] = {
         "vcodec": CODECS.get(video_codec, format_settings["vcodec"]),
         "acodec": resolved_acodec,
     }
+    if disable_audio:
+        kwargs.pop("acodec", None)
+        kwargs["an"] = None
 
     if audio_bitrate:
         kwargs["audio_bitrate"] = audio_bitrate
