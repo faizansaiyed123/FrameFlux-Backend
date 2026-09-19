@@ -220,7 +220,8 @@ def apply_fade(
     if fade_in:
         stream = stream.filter("afade", t="in", st=0, d=fade_in)
     if fade_out:
-        stream = stream.filter("afade", t="out", st=None, d=fade_out)
+        # Let FFmpeg derive the start time from the stream duration by using no explicit `st`.
+        stream = stream.filter("afade", t="out", d=fade_out)
     _run(stream.output(output_path, **kwargs).overwrite_output())
 
 
