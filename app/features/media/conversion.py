@@ -203,6 +203,9 @@ def compress_media(
     output_path: str,
     preset: str = "balanced",
     target_size_mb: int | None = None,
+    resolution: str | None = None,
+    custom_width: int | None = None,
+    custom_height: int | None = None,
 ) -> dict:
     if not Path(input_path).exists():
         raise FileNotFoundError(f"Media file not found: {input_path}")
@@ -215,6 +218,21 @@ def compress_media(
     settings = COMPRESSION_PRESETS[preset]
     kwargs["crf"] = settings["crf"]
     kwargs["preset"] = settings["preset"]
+
+    if custom_width and custom_height:
+        kwargs["vf"] = f"scale={custom_width}:{custom_height}"
+    elif resolution:
+        if "x" in resolution:
+            width_text, height_text = resolution.lower().split("x", 1)
+            width = int(width_text)
+            height = int(height_text)
+            if width <= 0 or height <= 0:
+                raise ValueError(f"Invalid resolution: {resolution}")
+            kwargs["vf"] = f"scale={width}:{height}"
+        elif resolution in RESOLUTIONS:
+            kwargs["vf"] = f"scale=-2:{RESOLUTIONS[resolution]}"
+        else:
+            raise ValueError(f"Unsupported resolution: {resolution}")
 
     if target_size_mb is not None:
         probe = ffmpeg.probe(input_path)
