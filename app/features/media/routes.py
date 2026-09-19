@@ -956,12 +956,46 @@ async def reorder_clips_endpoint(
     db: AsyncSession = Depends(get_db),
 ):
     media = await get_media_or_404(media_id, db, user_id=current_user.id)
-    await verify_media_references_ownership(data.media_ids, current_user.id, db)
+
+    # The public API accepts media IDs or stored filenames, while the worker
+    # operates on files in storage. Resolve every reference to its stored filename
+    # before enqueueing the merge task, preserving the requested order.
+    resolved_filenames: list[str] = []
+    for ref in data.media_ids:
+        query = select(Media)
+        try:
+            ref_uuid = UUID(ref)
+            query = query.where((Media.id == ref_uuid) | (Media.stored_filename == ref))
+        except (ValueError, TypeError):
+            query = query.where(Media.stored_filename == ref)
+
+        result = await db.execute(query)
+        referenced_media = result.scalars().first()
+
+        if referenced_media is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Media reference not found: {ref}",
+            )
+        if referenced_media.user_id is not None and referenced_media.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cannot reference media belonging to another user",
+            )
+
+        resolved_filenames.append(referenced_media.stored_filename)
+
+    if len(resolved_filenames) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least 2 clips are required for reorder",
+        )
+
     output_filename = f"{media_id}_reorder_{uuid4().hex[:8]}.mp4"
     job = await enqueue_media_job(
         "merge_media_task",
         str(media_id),
-        data.media_ids,
+        resolved_filenames,
         output_filename,
     )
     await mark_processing_pending(media, db)
