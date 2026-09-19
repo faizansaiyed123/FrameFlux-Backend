@@ -335,6 +335,9 @@ async def compress_media_task(
                 str(output_path),
                 preset=preset,
                 target_size_mb=target_size_mb,
+                resolution=options.get("resolution"),
+                custom_width=options.get("width"),
+                custom_height=options.get("height"),
             )
 
             media.processed_filename = output_filename
