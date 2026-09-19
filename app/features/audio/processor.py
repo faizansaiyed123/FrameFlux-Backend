@@ -112,7 +112,8 @@ def convert_audio(
         "ogg": "libvorbis",
         "m4a": "aac",
         "opus": "libopus",
-        "aiff": "pcm_s16le",
+        "aiff": "pcm_s16be",
+        "wma": "wmav2",
     }
     acodec = codec_map.get(format)
     if not acodec:
