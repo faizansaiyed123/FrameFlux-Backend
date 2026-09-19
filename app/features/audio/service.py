@@ -78,7 +78,10 @@ def replace_audio(input_path: str, audio_path: str, output_path: str, fade_in: f
     if fade_in:
         audio = audio.filter("afade", t="in", st=0, d=fade_in)
     if fade_out:
-        audio = audio.filter("afade", t="out", st=None, d=fade_out)
+        probe = ffmpeg.probe(audio_path)
+        duration = float(probe.get("format", {}).get("duration", 0) or 0)
+        fade_start = max(duration - fade_out, 0)
+        audio = audio.filter("afade", t="out", st=fade_start, d=fade_out)
 
     output = ffmpeg.output(video.video, audio, output_path, vcodec="libx264", acodec="aac", movflags="+faststart", shortest=None)
     _run(output)
