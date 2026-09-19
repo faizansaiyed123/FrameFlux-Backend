@@ -80,12 +80,14 @@ def sync_audio_video(
         # Replace video audio entirely
         output_audio = audio
 
-    # Apply video duration limit
+    # Apply video duration limit to the video stream itself. Reset timestamps so
+    # downstream muxing remains valid when the requested duration is shorter.
+    video_stream = video.video
     if video_duration:
-        video = video.filter("trim", duration=video_duration)
+        video_stream = video_stream.filter("trim", duration=video_duration).filter("setpts", "PTS-STARTPTS")
 
     _run(
-        ffmpeg.output(video.video, output_audio, output_path, vcodec="libx264", acodec="aac", movflags="+faststart", shortest=None)
+        ffmpeg.output(video_stream, output_audio, output_path, vcodec="libx264", acodec="aac", movflags="+faststart", shortest=None)
         .overwrite_output()
     )
 
