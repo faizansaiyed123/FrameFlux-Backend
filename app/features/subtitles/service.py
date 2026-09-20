@@ -113,3 +113,59 @@ def mux_soft_subtitles(
         .overwrite_output()
         .run()
     )
+
+
+def shift_subtitle_timestamps(subtitle_path: str, output_path: str, offset_seconds: float) -> None:
+    """Shift SRT/VTT/ASS cue timestamps by offset_seconds, clamping at zero."""
+    import re
+
+    source = Path(subtitle_path)
+    if not source.exists():
+        raise FileNotFoundError(f"Subtitle file not found: {subtitle_path}")
+
+    text = source.read_text(encoding="utf-8-sig")
+    extension = source.suffix.lower()
+
+    def clamp(value: float) -> float:
+        return max(0.0, value + offset_seconds)
+
+    def srt_vtt_time(match: re.Match[str]) -> str:
+        raw = match.group(0)
+        separator = "," if "," in raw else "."
+        h, m, rest = raw.replace(",", ".").split(":")
+        seconds = float(rest)
+        total = int(h) * 3600 + int(m) * 60 + seconds
+        shifted = clamp(total)
+        sh = int(shifted // 3600)
+        sm = int((shifted % 3600) // 60)
+        ss = shifted % 60
+        return f"{sh:02d}:{sm:02d}:{ss:06.3f}".replace(".", separator)
+
+    def ass_time(match: re.Match[str]) -> str:
+        raw = match.group(0)
+        h, m, s = raw.split(":")
+        total = int(h) * 3600 + int(m) * 60 + float(s)
+        shifted = clamp(total)
+        sh = int(shifted // 3600)
+        sm = int((shifted % 3600) // 60)
+        ss = shifted % 60
+        return f"{sh}:{sm:02d}:{ss:05.2f}"
+
+    if extension in {".srt", ".vtt", ".sub", ".txt"}:
+        pattern = re.compile(r"\d{2}:\d{2}:\d{2}[,.]\d{3}")
+        transformed = pattern.sub(srt_vtt_time, text)
+    elif extension == ".ass":
+        lines = []
+        for line in text.splitlines(keepends=True):
+            if line.startswith("Dialogue:"):
+                parts = line.rstrip("\r\n").split(",")
+                if len(parts) >= 3:
+                    parts[1] = ass_time(re.fullmatch(r"\d+:\d{2}:\d{2}\.\d{2}", parts[1].strip()) or re.match(r"\d+:\d{2}:\d{2}\.\d{2}", parts[1].strip()))
+                    parts[2] = ass_time(re.fullmatch(r"\d+:\d{2}:\d{2}\.\d{2}", parts[2].strip()) or re.match(r"\d+:\d{2}:\d{2}\.\d{2}", parts[2].strip()))
+                    line = ",".join(parts) + ("\n" if line.endswith("\n") else "")
+            lines.append(line)
+        transformed = "".join(lines)
+    else:
+        raise ValueError(f"Unsupported subtitle format for timestamp shifting: {extension}")
+
+    Path(output_path).write_text(transformed, encoding="utf-8")
