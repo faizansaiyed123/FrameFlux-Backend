@@ -646,3 +646,126 @@ def split_subtitle_entry(
         raise ValueError(f"Unsupported subtitle format for entry splitting: {extension}")
 
     Path(output_path).write_text(updated_content, encoding="utf-8")
+
+def merge_subtitle_entries(
+    subtitle_path: str,
+    output_path: str,
+    entry_index: int,
+) -> None:
+    """Merge one cue with the following cue, combining their time range and text."""
+    import re
+
+    source = Path(subtitle_path)
+    if not source.exists():
+        raise FileNotFoundError(f"Subtitle file not found: {subtitle_path}")
+    if entry_index < 0:
+        raise ValueError("Subtitle entry index must be zero or greater")
+
+    content = source.read_text(encoding="utf-8-sig")
+    extension = source.suffix.lower()
+
+    def parse_srt_vtt(value: str) -> float:
+        h, m, rest = value.replace(",", ".").split(":")
+        return int(h) * 3600 + int(m) * 60 + float(rest)
+
+    def format_srt(value: float) -> str:
+        total_ms = round(value * 1000)
+        hours = total_ms // 3_600_000
+        minutes = (total_ms % 3_600_000) // 60_000
+        seconds = (total_ms % 60_000) / 1000
+        return f"{hours:02d}:{minutes:02d}:{seconds:06.3f}".replace(".", ",")
+
+    def format_vtt(value: float) -> str:
+        total_ms = round(value * 1000)
+        hours = total_ms // 3_600_000
+        minutes = (total_ms % 3_600_000) // 60_000
+        seconds = (total_ms % 60_000) / 1000
+        return f"{hours:02d}:{minutes:02d}:{seconds:06.3f}"
+
+    def parse_ass(value: str) -> float:
+        h, m, s = value.split(":")
+        return int(h) * 3600 + int(m) * 60 + float(s)
+
+    def format_ass(value: float) -> str:
+        centiseconds = round(value * 100)
+        hours = centiseconds // 360000
+        minutes = (centiseconds % 360000) // 6000
+        seconds = (centiseconds % 6000) / 100
+        return f"{hours:d}:{minutes:02d}:{seconds:05.2f}"
+
+    if extension in {".srt", ".vtt", ".sub", ".txt"}:
+        blocks = re.split(r"\n{2,}", content.strip())
+        cues = [(i, b) for i, b in enumerate(blocks) if "-->" in b]
+        if entry_index >= len(cues) - 1:
+            raise ValueError("Selected subtitle entry must have a following entry to merge")
+
+        first_i, first_block = cues[entry_index]
+        second_i, second_block = cues[entry_index + 1]
+        first_lines = first_block.splitlines()
+        second_lines = second_block.splitlines()
+        first_timing_i = next(i for i, line in enumerate(first_lines) if "-->" in line)
+        second_timing_i = next(i for i, line in enumerate(second_lines) if "-->" in line)
+        first_start, _ = [part.strip() for part in first_lines[first_timing_i].split("-->", 1)]
+        _, second_end = [part.strip() for part in second_lines[second_timing_i].split("-->", 1)]
+        separator = "," if "," in first_lines[first_timing_i] else "."
+        start_value = parse_srt_vtt(first_start)
+        end_value = parse_srt_vtt(second_end)
+        timing = (
+            (format_srt(start_value) if separator == "," else format_vtt(start_value))
+            + " --> "
+            + (format_srt(end_value) if separator == "," else format_vtt(end_value))
+        )
+        first_text = first_lines[first_timing_i + 1:]
+        second_text = second_lines[second_timing_i + 1:]
+        combined_text = "\n".join(first_text + [""] + second_text)
+        prefix = first_lines[:first_timing_i]
+        merged = "\n".join(prefix + [timing, combined_text])
+
+        rebuilt = []
+        cue_seen = 0
+        for idx, block in enumerate(blocks):
+            if idx == first_i:
+                rebuilt.append(merged)
+            elif idx == second_i:
+                continue
+            else:
+                rebuilt.append(block)
+            if "-->" in block:
+                cue_seen += 1
+
+        if extension == ".srt":
+            cue_no = 1
+            renumbered = []
+            for block in rebuilt:
+                if "-->" in block:
+                    lines = block.splitlines()
+                    if lines and lines[0].strip().isdigit():
+                        lines[0] = str(cue_no)
+                    cue_no += 1
+                    renumbered.append("\n".join(lines))
+                else:
+                    renumbered.append(block)
+            rebuilt = renumbered
+        updated_content = "\n\n".join(rebuilt) + "\n"
+
+    elif extension == ".ass":
+        lines = content.splitlines(keepends=True)
+        dialogue = [i for i, line in enumerate(lines) if line.startswith("Dialogue:")]
+        if entry_index >= len(dialogue) - 1:
+            raise ValueError("Selected subtitle entry must have a following entry to merge")
+        first_i, second_i = dialogue[entry_index], dialogue[entry_index + 1]
+        first = lines[first_i].rstrip("\r\n").split(",", 9)
+        second = lines[second_i].rstrip("\r\n").split(",", 9)
+        if len(first) < 10 or len(second) < 10:
+            raise ValueError("Invalid ASS dialogue entry")
+        start_value = parse_ass(first[1].strip())
+        end_value = parse_ass(second[2].strip())
+        first[2] = format_ass(end_value)
+        first[9] = first[9] + r"\N" + second[9]
+        lines[first_i] = ",".join(first) + ("\n" if lines[first_i].endswith("\n") else "")
+        del lines[second_i]
+        updated_content = "".join(lines)
+    else:
+        raise ValueError(f"Unsupported subtitle format for entry merging: {extension}")
+
+    Path(output_path).write_text(updated_content, encoding="utf-8")
