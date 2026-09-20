@@ -205,27 +205,38 @@ async def sync_subtitles(
         raise HTTPException(status_code=404, detail="Media not found")
 
     input_path = get_uploaded_file(media.stored_filename)
+    subtitle_file = get_uploaded_file(data.subtitle_path)
+    if not subtitle_file.exists():
+        raise HTTPException(status_code=404, detail="Subtitle file not found")
+
     output_filename = f"{media_id}_synced_{uuid4().hex[:8]}.mp4"
     output_path = Path(settings.processed_dir) / output_filename
-
-    if data.preview:
-        return {"preview_url": f"/media/{media_id}/file", "offset": data.offset_seconds, "scale": data.scale}
-
     try:
+        video_input = ffmpeg.input(str(input_path))
+        subtitle_input = ffmpeg.input(
+            str(subtitle_file),
+            itsoffset=data.offset_seconds,
+            itsscale=data.scale,
+        )
         (
-            ffmpeg.input(str(input_path))
+            ffmpeg
             .output(
+                video_input.video,
+                video_input.audio,
+                subtitle_input,
                 str(output_path),
-                vf=f"subtitles={subtitle_file}:si=0,setpts=PTS*{data.scale}+{data.offset_seconds}/TB",
-                vcodec="libx264",
-                acodec="aac",
+                vcodec="copy",
+                acodec="copy",
+                scodec="mov_text",
+                map_metadata=0,
+                shortest=1,
                 movflags="+faststart",
             )
             .overwrite_output()
             .run()
         )
     except ffmpeg.Error as exc:
-        error = exc.stderr.decode(errors="replace") if exc.stderr else "FFmpeg sync failed"
-        raise RuntimeError(error) from exc
+        error = exc.stderr.decode(errors="replace") if exc.stderr else "FFmpeg subtitle sync failed"
+        raise HTTPException(status_code=500, detail=error) from exc
 
     return FileResponse(path=output_path, media_type="video/mp4", filename=output_filename)
