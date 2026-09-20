@@ -20,6 +20,7 @@ from app.features.subtitles.service import (
     mux_soft_subtitles,
     shift_subtitle_timestamps,
     update_subtitle_text,
+    update_subtitle_timing,
 )
 from app.features.subtitles.schemas import SubtitleBurnRequest, SubtitleSyncRequest, SubtitleEditRequest, SubtitleTrackResponse
 
@@ -206,12 +207,10 @@ async def edit_subtitle(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if data.operation != "update_text":
-        raise HTTPException(status_code=400, detail="Only subtitle text editing is currently supported")
+    if data.operation not in {"update_text", "update_timing"}:
+        raise HTTPException(status_code=400, detail="Only subtitle text and timing editing are currently supported")
     if data.entry_index is None:
-        raise HTTPException(status_code=422, detail="entry_index is required for text editing")
-    if data.text is None:
-        raise HTTPException(status_code=422, detail="text is required for text editing")
+        raise HTTPException(status_code=422, detail="entry_index is required for subtitle editing")
 
     result = await db.execute(
         select(Media).where(Media.id == media_id, Media.user_id == current_user.id)
@@ -227,12 +226,21 @@ async def edit_subtitle(
     output_filename = f"{media_id}_subtitle_edited_{uuid4().hex[:8]}{subtitle_file.suffix.lower()}"
     output_path = Path(settings.processed_dir) / output_filename
     try:
-        update_subtitle_text(
-            str(subtitle_file),
-            str(output_path),
-            data.entry_index,
-            data.text,
-        )
+        if data.operation == "update_text":
+            update_subtitle_text(
+                str(subtitle_file),
+                str(output_path),
+                data.entry_index,
+                data.text,
+            )
+        else:
+            update_subtitle_timing(
+                str(subtitle_file),
+                str(output_path),
+                data.entry_index,
+                data.start,
+                data.end,
+            )
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
