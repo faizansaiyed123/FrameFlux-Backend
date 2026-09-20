@@ -14,7 +14,7 @@ from app.features.auth.models import User
 from app.features.media.models import Media, MediaVersion
 from app.infrastructure.database import get_db
 from app.features.media.processor import get_uploaded_file
-from app.features.subtitles.service import burn_subtitles_into_video, extract_subtitle_track, mux_soft_subtitles
+from app.features.subtitles.service import burn_subtitles_into_video, extract_subtitle_track, mux_soft_subtitles, shift_subtitle_timestamps
 from app.features.subtitles.schemas import SubtitleBurnRequest, SubtitleSyncRequest, SubtitleEditRequest, SubtitleTrackResponse
 
 router = APIRouter(prefix="/subtitles", tags=["Subtitles"])
@@ -211,13 +211,13 @@ async def sync_subtitles(
 
     output_filename = f"{media_id}_synced_{uuid4().hex[:8]}.mp4"
     output_path = Path(settings.processed_dir) / output_filename
+    shifted_subtitle_path = Path(settings.temp_dir) / f"{media_id}_subtitle_shift_{uuid4().hex}{subtitle_file.suffix}"
+
     try:
+        shift_subtitle_timestamps(str(subtitle_file), str(shifted_subtitle_path), data.offset_seconds)
+
         video_input = ffmpeg.input(str(input_path))
-        subtitle_input = ffmpeg.input(
-            str(subtitle_file),
-            itsoffset=data.offset_seconds,
-            itsscale=data.scale,
-        )
+        subtitle_input = ffmpeg.input(str(shifted_subtitle_path))
         (
             ffmpeg
             .output(
@@ -235,8 +235,10 @@ async def sync_subtitles(
             .overwrite_output()
             .run()
         )
-    except ffmpeg.Error as exc:
-        error = exc.stderr.decode(errors="replace") if exc.stderr else "FFmpeg subtitle sync failed"
-        raise HTTPException(status_code=500, detail=error) from exc
+    except (ffmpeg.Error, ValueError) as exc:
+        error = exc.stderr.decode(errors="replace") if isinstance(exc, ffmpeg.Error) and exc.stderr else str(exc)
+        raise HTTPException(status_code=500, detail=error or "FFmpeg subtitle sync failed") from exc
+    finally:
+        shifted_subtitle_path.unlink(missing_ok=True)
 
     return FileResponse(path=output_path, media_type="video/mp4", filename=output_filename)
