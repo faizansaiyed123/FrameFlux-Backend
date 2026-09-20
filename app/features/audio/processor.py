@@ -65,11 +65,26 @@ def sync_audio_video(
     # Apply volume to external audio
     audio = audio.filter("volume", volume)
 
-    # Apply fade in/out to external audio
+    # Apply fade in/out to external audio. FFmpeg requires an explicit
+    # start time for fade-out; derive it from the effective audio duration
+    # after offset/duration constraints.
     if fade_in:
         audio = audio.filter("afade", t="in", st=0, d=fade_in)
     if fade_out:
-        audio = audio.filter("afade", t="out", st=None, d=fade_out)
+        probe = ffmpeg.probe(audio_path)
+        source_duration = float(probe.get("format", {}).get("duration", 0) or 0)
+        effective_duration = source_duration
+        if audio_offset > 0:
+            effective_duration += audio_offset
+        elif audio_offset < 0:
+            effective_duration = max(effective_duration + audio_offset, 0.0)
+        if audio_duration:
+            effective_duration = min(effective_duration, audio_duration)
+        if effective_duration <= 0:
+            raise ValueError("Unable to determine audio duration for fade-out")
+        fade_duration = min(float(fade_out), effective_duration)
+        fade_start = max(effective_duration - fade_duration, 0.0)
+        audio = audio.filter("afade", t="out", st=fade_start, d=fade_duration)
 
     if mix:
         # Mix external audio with original video audio
