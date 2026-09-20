@@ -234,3 +234,91 @@ def update_subtitle_text(
         raise ValueError(f"Unsupported subtitle format for text editing: {extension}")
 
     Path(output_path).write_text(updated_content, encoding="utf-8")
+
+def update_subtitle_timing(
+    subtitle_path: str,
+    output_path: str,
+    entry_index: int,
+    start_seconds: float,
+    end_seconds: float,
+) -> None:
+    """Replace one subtitle cue's start/end times while preserving its text and format."""
+    import re
+
+    source = Path(subtitle_path)
+    if not source.exists():
+        raise FileNotFoundError(f"Subtitle file not found: {subtitle_path}")
+    if entry_index < 0:
+        raise ValueError("Subtitle entry index must be zero or greater")
+    if start_seconds < 0 or end_seconds <= start_seconds:
+        raise ValueError("Subtitle end time must be greater than start time and both must be non-negative")
+
+    content = source.read_text(encoding="utf-8-sig")
+    extension = source.suffix.lower()
+    updated = False
+
+    def format_srt_vtt(value: float, separator: str) -> str:
+        total_ms = round(value * 1000)
+        hours = total_ms // 3_600_000
+        minutes = (total_ms % 3_600_000) // 60_000
+        seconds = (total_ms % 60_000) / 1000
+        return f"{hours:02d}:{minutes:02d}:{seconds:06.3f}".replace(".", separator)
+
+    def format_ass(value: float) -> str:
+        centiseconds = round(value * 100)
+        hours = centiseconds // 360000
+        minutes = (centiseconds % 360000) // 6000
+        seconds = (centiseconds % 6000) / 100
+        return f"{hours:d}:{minutes:02d}:{seconds:05.2f}"
+
+    if extension in {".srt", ".vtt", ".sub", ".txt"}:
+        blocks = re.split(r"\n{2,}", content.strip())
+        cue_index = -1
+        out_blocks = []
+        for block in blocks:
+            if "-->" not in block:
+                out_blocks.append(block)
+                continue
+            cue_index += 1
+            if cue_index == entry_index:
+                lines = block.splitlines()
+                timing_index = next(i for i, line in enumerate(lines) if "-->" in line)
+                separator = "," if "," in lines[timing_index] else "."
+                lines[timing_index] = (
+                    format_srt_vtt(start_seconds, separator)
+                    + " --> "
+                    + format_srt_vtt(end_seconds, separator)
+                )
+                out_blocks.append("\n".join(lines))
+                updated = True
+            else:
+                out_blocks.append(block)
+        if not updated:
+            raise ValueError(f"Subtitle entry {entry_index + 1} not found")
+        updated_content = "\n\n".join(out_blocks) + "\n"
+
+    elif extension == ".ass":
+        cue_index = -1
+        out_lines = []
+        for line in content.splitlines(keepends=True):
+            if line.startswith("Dialogue:"):
+                cue_index += 1
+                if cue_index == entry_index:
+                    newline = "\n" if line.endswith("\n") else ""
+                    raw = line.rstrip("\r\n")
+                    parts = raw.split(",", 9)
+                    if len(parts) < 10:
+                        raise ValueError("Invalid ASS dialogue entry")
+                    parts[1] = format_ass(start_seconds)
+                    parts[2] = format_ass(end_seconds)
+                    line = ",".join(parts) + newline
+                    updated = True
+            out_lines.append(line)
+        if not updated:
+            raise ValueError(f"Subtitle entry {entry_index + 1} not found")
+        updated_content = "".join(out_lines)
+
+    else:
+        raise ValueError(f"Unsupported subtitle format for timing editing: {extension}")
+
+    Path(output_path).write_text(updated_content, encoding="utf-8")
