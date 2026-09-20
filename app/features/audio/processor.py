@@ -275,7 +275,6 @@ def create_video_from_audio(
         video = ffmpeg.input(
             "color=c={}:s={}x{}:r={}".format(background_color.lstrip("#"), width, height, fps),
             f="lavfi",
-            framerate=fps,
         )
 
     audio = ffmpeg.input(audio_path)
