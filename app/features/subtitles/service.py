@@ -93,17 +93,22 @@ def mux_soft_subtitles(
         disposition.append("forced")
     disposition_str = "+".join(disposition) if disposition else "0"
 
+    video_input = ffmpeg.input(input_path)
+    subtitle_input = ffmpeg.input(subtitle_path)
     (
-        ffmpeg.input(input_path)
+        ffmpeg
         .output(
+            video_input.video,
+            video_input.audio,
+            subtitle_input['s'],
             str(output_path),
+            vcodec="copy",
+            acodec="copy",
+            scodec="mov_text",
             **{
-                "i": str(subtitle_path),
-                "c": "copy",
-                "c:s": "mov_text",
                 "metadata:s:s:0": f"language={language}",
                 "disposition:s:s:0": disposition_str,
-            }
+            },
         )
         .overwrite_output()
         .run()
