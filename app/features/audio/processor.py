@@ -305,19 +305,29 @@ def create_video_from_audio(
     if duration:
         video = video.filter("trim", duration=duration)
 
-    overlay_expr = []
     if title:
-        overlay_expr.append(f"drawtext=text='{title}':fontcolor=white:fontsize=24:x=(w-text_w)/2:y=h-50")
+        video = video.filter(
+            "drawtext",
+            text=title,
+            fontcolor="white",
+            fontsize=24,
+            x="(w-text_w)/2",
+            y="h-50",
+        )
     if text:
-        overlay_expr.append(f"drawtext=text='{text}':fontcolor=white:fontsize=18:x=(w-text_w)/2:y=h-100")
+        video = video.filter(
+            "drawtext",
+            text=text,
+            fontcolor="white",
+            fontsize=18,
+            x="(w-text_w)/2",
+            y="h-100",
+        )
     if watermark and Path(watermark).exists():
         video = ffmpeg.overlay(video, ffmpeg.input(watermark))
 
     if show_waveform and visualizer_style:
         video = video.filter("showwaves", mode=visualizer_style, rate=30)
-
-    if overlay_expr:
-        video = video.filter(",".join(overlay_expr))
 
     _run(
         ffmpeg.output(video, audio, output_path, vcodec=vcodec, acodec=acodec, shortest=None, pix_fmt="yuv420p")
