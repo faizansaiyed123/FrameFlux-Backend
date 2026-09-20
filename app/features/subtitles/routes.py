@@ -14,7 +14,13 @@ from app.features.auth.models import User
 from app.features.media.models import Media, MediaVersion
 from app.infrastructure.database import get_db
 from app.features.media.processor import get_uploaded_file
-from app.features.subtitles.service import burn_subtitles_into_video, extract_subtitle_track, mux_soft_subtitles, shift_subtitle_timestamps
+from app.features.subtitles.service import (
+    burn_subtitles_into_video,
+    extract_subtitle_track,
+    mux_soft_subtitles,
+    shift_subtitle_timestamps,
+    update_subtitle_text,
+)
 from app.features.subtitles.schemas import SubtitleBurnRequest, SubtitleSyncRequest, SubtitleEditRequest, SubtitleTrackResponse
 
 router = APIRouter(prefix="/subtitles", tags=["Subtitles"])
@@ -190,6 +196,54 @@ async def list_subtitle_tracks(
     input_path = get_uploaded_file(media.stored_filename)
     tracks = extract_subtitle_track(str(input_path))
     return [SubtitleTrackResponse(**track) for track in tracks]
+
+
+
+@router.post("/{media_id}/edit")
+async def edit_subtitle(
+    media_id: UUID,
+    data: SubtitleEditRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if data.operation != "update_text":
+        raise HTTPException(status_code=400, detail="Only subtitle text editing is currently supported")
+    if data.entry_index is None:
+        raise HTTPException(status_code=422, detail="entry_index is required for text editing")
+    if data.text is None:
+        raise HTTPException(status_code=422, detail="text is required for text editing")
+
+    result = await db.execute(
+        select(Media).where(Media.id == media_id, Media.user_id == current_user.id)
+    )
+    media = result.scalar_one_or_none()
+    if media is None:
+        raise HTTPException(status_code=404, detail="Media not found")
+
+    subtitle_file = get_uploaded_file(data.subtitle_path)
+    if not subtitle_file.exists():
+        raise HTTPException(status_code=404, detail="Subtitle file not found")
+
+    output_filename = f"{media_id}_subtitle_edited_{uuid4().hex[:8]}{subtitle_file.suffix.lower()}"
+    output_path = Path(settings.processed_dir) / output_filename
+    try:
+        update_subtitle_text(
+            str(subtitle_file),
+            str(output_path),
+            data.entry_index,
+            data.text,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    media_type = {
+        ".srt": "application/x-subrip",
+        ".vtt": "text/vtt",
+        ".ass": "text/plain",
+        ".sub": "text/plain",
+        ".txt": "text/plain",
+    }.get(subtitle_file.suffix.lower(), "text/plain")
+    return FileResponse(path=output_path, media_type=media_type, filename=output_filename)
 
 
 @router.post("/{media_id}/sync")
