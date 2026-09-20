@@ -429,3 +429,72 @@ def add_subtitle_entry(
         raise ValueError(f"Unsupported subtitle format for entry insertion: {extension}")
 
     Path(output_path).write_text(updated_content, encoding="utf-8")
+
+def delete_subtitle_entry(
+    subtitle_path: str,
+    output_path: str,
+    entry_index: int,
+) -> None:
+    """Delete one zero-based subtitle cue while preserving the remaining file format."""
+    import re
+
+    source = Path(subtitle_path)
+    if not source.exists():
+        raise FileNotFoundError(f"Subtitle file not found: {subtitle_path}")
+    if entry_index < 0:
+        raise ValueError("Subtitle entry index must be zero or greater")
+
+    content = source.read_text(encoding="utf-8-sig")
+    extension = source.suffix.lower()
+
+    if extension in {".srt", ".vtt", ".sub", ".txt"}:
+        blocks = re.split(r"\n{2,}", content.strip())
+        cue_index = -1
+        kept = []
+        deleted = False
+        for block in blocks:
+            if "-->" not in block:
+                kept.append(block)
+                continue
+            cue_index += 1
+            if cue_index == entry_index:
+                deleted = True
+                continue
+            kept.append(block)
+        if not deleted:
+            raise ValueError(f"Subtitle entry {entry_index + 1} not found")
+
+        if extension == ".srt":
+            cue_no = 1
+            renumbered = []
+            for block in kept:
+                if "-->" in block:
+                    lines = block.splitlines()
+                    if lines and lines[0].strip().isdigit():
+                        lines[0] = str(cue_no)
+                    cue_no += 1
+                    renumbered.append("\n".join(lines))
+                else:
+                    renumbered.append(block)
+            kept = renumbered
+        updated_content = "\n\n".join(kept).strip() + ("\n" if kept else "")
+
+    elif extension == ".ass":
+        lines = content.splitlines(keepends=True)
+        cue_index = -1
+        kept = []
+        deleted = False
+        for line in lines:
+            if line.startswith("Dialogue:"):
+                cue_index += 1
+                if cue_index == entry_index:
+                    deleted = True
+                    continue
+            kept.append(line)
+        if not deleted:
+            raise ValueError(f"Subtitle entry {entry_index + 1} not found")
+        updated_content = "".join(kept)
+    else:
+        raise ValueError(f"Unsupported subtitle format for entry deletion: {extension}")
+
+    Path(output_path).write_text(updated_content, encoding="utf-8")
