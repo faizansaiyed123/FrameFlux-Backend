@@ -297,6 +297,6 @@ def create_video_from_audio(
         video = video.filter(",".join(overlay_expr))
 
     _run(
-        ffmpeg.output(video, audio, output_path, vcodec=vcodec, acodec=acodec, shortest=True, pix_fmt="yuv420p")
+        ffmpeg.output(video, audio, output_path, vcodec=vcodec, acodec=acodec, shortest=None, pix_fmt="yuv420p")
         .overwrite_output()
     )
