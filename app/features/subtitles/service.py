@@ -322,3 +322,110 @@ def update_subtitle_timing(
         raise ValueError(f"Unsupported subtitle format for timing editing: {extension}")
 
     Path(output_path).write_text(updated_content, encoding="utf-8")
+
+def add_subtitle_entry(
+    subtitle_path: str,
+    output_path: str,
+    insert_after_index: int | None,
+    start_seconds: float,
+    end_seconds: float,
+    new_text: str,
+) -> None:
+    """Add one subtitle cue, inserting after a zero-based cue index or appending when omitted."""
+    import re
+
+    source = Path(subtitle_path)
+    if not source.exists():
+        raise FileNotFoundError(f"Subtitle file not found: {subtitle_path}")
+    if start_seconds < 0 or end_seconds <= start_seconds:
+        raise ValueError("Subtitle end time must be greater than start time and both must be non-negative")
+    if insert_after_index is not None and insert_after_index < -1:
+        raise ValueError("insert_after_index must be -1 or greater")
+
+    content = source.read_text(encoding="utf-8-sig")
+    extension = source.suffix.lower()
+    replacement = new_text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not replacement:
+        raise ValueError("Subtitle text is required")
+
+    def format_srt(value: float) -> str:
+        total_ms = round(value * 1000)
+        hours = total_ms // 3_600_000
+        minutes = (total_ms % 3_600_000) // 60_000
+        seconds = (total_ms % 60_000) / 1000
+        return f"{hours:02d}:{minutes:02d}:{seconds:06.3f}".replace(".", ",")
+
+    def format_vtt(value: float) -> str:
+        total_ms = round(value * 1000)
+        hours = total_ms // 3_600_000
+        minutes = (total_ms % 3_600_000) // 60_000
+        seconds = (total_ms % 60_000) / 1000
+        return f"{hours:02d}:{minutes:02d}:{seconds:06.3f}"
+
+    def format_ass(value: float) -> str:
+        centiseconds = round(value * 100)
+        hours = centiseconds // 360000
+        minutes = (centiseconds % 360000) // 6000
+        seconds = (centiseconds % 6000) / 100
+        return f"{hours:d}:{minutes:02d}:{seconds:05.2f}"
+
+    if extension in {".srt", ".vtt", ".sub", ".txt"}:
+        blocks = re.split(r"\n{2,}", content.strip())
+        cue_blocks = [b for b in blocks if "-->" in b]
+        insert_pos = len(cue_blocks) if insert_after_index is None else insert_after_index + 1
+        if insert_pos < 0 or insert_pos > len(cue_blocks):
+            raise ValueError("insert_after_index is outside the subtitle range")
+        new_time = (
+            (format_srt(start_seconds) + " --> " + format_srt(end_seconds))
+            if extension == ".srt"
+            else (format_vtt(start_seconds) + " --> " + format_vtt(end_seconds))
+        )
+        if extension == ".srt":
+            new_block = "\n".join([str(insert_pos + 1), new_time] + (replacement.splitlines() or [""]))
+        else:
+            new_block = "\n".join([new_time] + (replacement.splitlines() or [""]))
+
+        rebuilt = []
+        seen_cues = 0
+        for block in blocks:
+            if "-->" in block:
+                if seen_cues == insert_pos:
+                    rebuilt.append(new_block)
+                rebuilt.append(block)
+                seen_cues += 1
+            else:
+                rebuilt.append(block)
+        if insert_pos == len(cue_blocks):
+            rebuilt.append(new_block)
+
+        if extension == ".srt":
+            cue_no = 1
+            renumbered = []
+            for block in rebuilt:
+                if "-->" in block:
+                    lines = block.splitlines()
+                    if lines and lines[0].strip().isdigit():
+                        lines[0] = str(cue_no)
+                    cue_no += 1
+                    renumbered.append("\n".join(lines))
+                else:
+                    renumbered.append(block)
+            rebuilt = renumbered
+        updated_content = "\n\n".join(rebuilt) + "\n"
+
+    elif extension == ".ass":
+        lines = content.splitlines(keepends=True)
+        dialogue_positions = [i for i, line in enumerate(lines) if line.startswith("Dialogue:")]
+        insert_pos = len(dialogue_positions) if insert_after_index is None else insert_after_index + 1
+        if insert_pos < 0 or insert_pos > len(dialogue_positions):
+            raise ValueError("insert_after_index is outside the subtitle range")
+        dialogue = "Dialogue: 0," + format_ass(start_seconds) + "," + format_ass(end_seconds) + ",Default,,0,0,0,," + replacement.replace("\n", r"\N") + "\n"
+        if insert_pos == len(dialogue_positions):
+            lines.append(dialogue)
+        else:
+            lines.insert(dialogue_positions[insert_pos], dialogue)
+        updated_content = "".join(lines)
+    else:
+        raise ValueError(f"Unsupported subtitle format for entry insertion: {extension}")
+
+    Path(output_path).write_text(updated_content, encoding="utf-8")
