@@ -229,7 +229,7 @@ async def sync_subtitles(
                 acodec="copy",
                 scodec="mov_text",
                 map_metadata=0,
-                shortest=1,
+                shortest=None,
                 movflags="+faststart",
             )
             .overwrite_output()
