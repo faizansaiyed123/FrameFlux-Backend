@@ -220,8 +220,15 @@ def apply_fade(
     if fade_in:
         stream = stream.filter("afade", t="in", st=0, d=fade_in)
     if fade_out:
-        # Let FFmpeg derive the start time from the stream duration by using no explicit `st`.
-        stream = stream.filter("afade", t="out", d=fade_out)
+        # FFmpeg's afade filter needs an explicit start time for a reliable fade-out.
+        # Derive it from the actual input duration and clamp the fade to the stream length.
+        probe = ffmpeg.probe(input_path)
+        duration = float(probe.get("format", {}).get("duration", 0) or 0)
+        if duration <= 0:
+            raise ValueError("Unable to determine audio duration for fade-out")
+        fade_duration = min(float(fade_out), duration)
+        fade_start = max(duration - fade_duration, 0.0)
+        stream = stream.filter("afade", t="out", st=fade_start, d=fade_duration)
     _run(stream.output(output_path, **kwargs).overwrite_output())
 
 
