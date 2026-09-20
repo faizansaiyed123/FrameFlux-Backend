@@ -498,3 +498,151 @@ def delete_subtitle_entry(
         raise ValueError(f"Unsupported subtitle format for entry deletion: {extension}")
 
     Path(output_path).write_text(updated_content, encoding="utf-8")
+
+def split_subtitle_entry(
+    subtitle_path: str,
+    output_path: str,
+    entry_index: int,
+    split_seconds: float,
+) -> None:
+    """Split one cue into two cues at the supplied timestamp."""
+    import re
+
+    source = Path(subtitle_path)
+    if not source.exists():
+        raise FileNotFoundError(f"Subtitle file not found: {subtitle_path}")
+    if entry_index < 0:
+        raise ValueError("Subtitle entry index must be zero or greater")
+
+    content = source.read_text(encoding="utf-8-sig")
+    extension = source.suffix.lower()
+
+    def parse_srt_vtt(value: str) -> float:
+        h, m, rest = value.replace(",", ".").split(":")
+        return int(h) * 3600 + int(m) * 60 + float(rest)
+
+    def format_srt(value: float) -> str:
+        total_ms = round(value * 1000)
+        hours = total_ms // 3_600_000
+        minutes = (total_ms % 3_600_000) // 60_000
+        seconds = (total_ms % 60_000) / 1000
+        return f"{hours:02d}:{minutes:02d}:{seconds:06.3f}".replace(".", ",")
+
+    def format_vtt(value: float) -> str:
+        total_ms = round(value * 1000)
+        hours = total_ms // 3_600_000
+        minutes = (total_ms % 3_600_000) // 60_000
+        seconds = (total_ms % 60_000) / 1000
+        return f"{hours:02d}:{minutes:02d}:{seconds:06.3f}"
+
+    def parse_ass(value: str) -> float:
+        h, m, s = value.split(":")
+        return int(h) * 3600 + int(m) * 60 + float(s)
+
+    def format_ass(value: float) -> str:
+        centiseconds = round(value * 100)
+        hours = centiseconds // 360000
+        minutes = (centiseconds % 360000) // 6000
+        seconds = (centiseconds % 6000) / 100
+        return f"{hours:d}:{minutes:02d}:{seconds:05.2f}"
+
+    if extension in {".srt", ".vtt", ".sub", ".txt"}:
+        blocks = re.split(r"\n{2,}", content.strip())
+        cue_index = -1
+        rebuilt = []
+        split_done = False
+        for block in blocks:
+            if "-->" not in block:
+                rebuilt.append(block)
+                continue
+            cue_index += 1
+            if cue_index != entry_index:
+                rebuilt.append(block)
+                continue
+
+            lines = block.splitlines()
+            timing_index = next(i for i, line in enumerate(lines) if "-->" in line)
+            left, right = [part.strip() for part in lines[timing_index].split("-->", 1)]
+            start_value = parse_srt_vtt(left)
+            end_value = parse_srt_vtt(right)
+            if not start_value < split_seconds < end_value:
+                raise ValueError("Split time must be inside the selected subtitle cue")
+
+            separator = "," if "," in lines[timing_index] else "."
+            text_lines = lines[timing_index + 1:] or [""]
+            text_block = "\n".join(text_lines)
+            first_timing = (
+                (format_srt(start_value) if separator == "," else format_vtt(start_value))
+                + " --> "
+                + (format_srt(split_seconds) if separator == "," else format_vtt(split_seconds))
+            )
+            second_timing = (
+                (format_srt(split_seconds) if separator == "," else format_vtt(split_seconds))
+                + " --> "
+                + (format_srt(end_value) if separator == "," else format_vtt(end_value))
+            )
+            prefix = lines[:timing_index]
+            rebuilt.extend([
+                "\n".join(prefix + [first_timing, text_block]),
+                "\n".join(prefix + [second_timing, text_block]),
+            ])
+            split_done = True
+
+        if not split_done:
+            raise ValueError(f"Subtitle entry {entry_index + 1} not found")
+
+        if extension == ".srt":
+            cue_no = 1
+            renumbered = []
+            for block in rebuilt:
+                if "-->" in block:
+                    lines = block.splitlines()
+                    if lines and lines[0].strip().isdigit():
+                        lines[0] = str(cue_no)
+                    cue_no += 1
+                    renumbered.append("\n".join(lines))
+                else:
+                    renumbered.append(block)
+            rebuilt = renumbered
+        updated_content = "\n\n".join(rebuilt) + "\n"
+
+    elif extension == ".ass":
+        lines = content.splitlines(keepends=True)
+        cue_index = -1
+        rebuilt = []
+        split_done = False
+        for line in lines:
+            if not line.startswith("Dialogue:"):
+                rebuilt.append(line)
+                continue
+            cue_index += 1
+            if cue_index != entry_index:
+                rebuilt.append(line)
+                continue
+
+            newline = "\n" if line.endswith("\n") else ""
+            raw = line.rstrip("\r\n")
+            parts = raw.split(",", 9)
+            if len(parts) < 10:
+                raise ValueError("Invalid ASS dialogue entry")
+            start_value = parse_ass(parts[1].strip())
+            end_value = parse_ass(parts[2].strip())
+            if not start_value < split_seconds < end_value:
+                raise ValueError("Split time must be inside the selected subtitle cue")
+
+            first = parts.copy()
+            second = parts.copy()
+            first[2] = format_ass(split_seconds)
+            second[1] = format_ass(split_seconds)
+            rebuilt.append(",".join(first) + newline)
+            rebuilt.append(",".join(second) + newline)
+            split_done = True
+
+        if not split_done:
+            raise ValueError(f"Subtitle entry {entry_index + 1} not found")
+        updated_content = "".join(rebuilt)
+
+    else:
+        raise ValueError(f"Unsupported subtitle format for entry splitting: {extension}")
+
+    Path(output_path).write_text(updated_content, encoding="utf-8")
