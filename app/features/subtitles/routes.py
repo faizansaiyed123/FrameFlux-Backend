@@ -223,7 +223,7 @@ async def sync_subtitles(
             .output(
                 video_input.video,
                 video_input.audio,
-                subtitle_input,
+                subtitle_input['s'],
                 str(output_path),
                 vcodec="copy",
                 acodec="copy",
