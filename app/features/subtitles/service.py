@@ -169,3 +169,68 @@ def shift_subtitle_timestamps(subtitle_path: str, output_path: str, offset_secon
         raise ValueError(f"Unsupported subtitle format for timestamp shifting: {extension}")
 
     Path(output_path).write_text(transformed, encoding="utf-8")
+
+def update_subtitle_text(
+    subtitle_path: str,
+    output_path: str,
+    entry_index: int,
+    new_text: str,
+) -> None:
+    """Replace one subtitle cue's text while preserving its timing and format."""
+    import re
+
+    source = Path(subtitle_path)
+    if not source.exists():
+        raise FileNotFoundError(f"Subtitle file not found: {subtitle_path}")
+    if entry_index < 0:
+        raise ValueError("Subtitle entry index must be zero or greater")
+
+    content = source.read_text(encoding="utf-8-sig")
+    extension = source.suffix.lower()
+    replacement = new_text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    updated = False
+
+    if extension in {".srt", ".vtt", ".sub", ".txt"}:
+        blocks = re.split(r"\n{2,}", content.strip())
+        cue_index = -1
+        out_blocks = []
+        for block in blocks:
+            if "-->" not in block:
+                out_blocks.append(block)
+                continue
+            cue_index += 1
+            if cue_index == entry_index:
+                lines = block.splitlines()
+                timing_index = next(i for i, line in enumerate(lines) if "-->" in line)
+                out_blocks.append("\n".join(lines[:timing_index + 1] + (replacement.splitlines() or [""])))
+                updated = True
+            else:
+                out_blocks.append(block)
+        if not updated:
+            raise ValueError(f"Subtitle entry {entry_index + 1} not found")
+        updated_content = "\n\n".join(out_blocks) + "\n"
+
+    elif extension == ".ass":
+        cue_index = -1
+        out_lines = []
+        for line in content.splitlines(keepends=True):
+            if line.startswith("Dialogue:"):
+                cue_index += 1
+                if cue_index == entry_index:
+                    newline = "\n" if line.endswith("\n") else ""
+                    raw = line.rstrip("\r\n")
+                    parts = raw.split(",", 9)
+                    if len(parts) < 10:
+                        raise ValueError("Invalid ASS dialogue entry")
+                    parts[9] = replacement.replace("\n", r"\N")
+                    line = ",".join(parts) + newline
+                    updated = True
+            out_lines.append(line)
+        if not updated:
+            raise ValueError(f"Subtitle entry {entry_index + 1} not found")
+        updated_content = "".join(out_lines)
+
+    else:
+        raise ValueError(f"Unsupported subtitle format for text editing: {extension}")
+
+    Path(output_path).write_text(updated_content, encoding="utf-8")
