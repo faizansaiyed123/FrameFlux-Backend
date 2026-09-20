@@ -249,6 +249,7 @@ def create_video_from_audio(
     audio_path: str,
     output_path: str,
     background_image: str | None = None,
+    background_images: list[str] | None = None,
     background_color: str = "#000000",
     title: str | None = None,
     text: str | None = None,
@@ -268,9 +269,31 @@ def create_video_from_audio(
     vcodec = "libx264" if output_format == "mp4" else "libvpx-vp9"
     acodec = "aac" if output_format == "mp4" else "libopus"
 
-    if background_image:
-        bg = ffmpeg.input(background_image, loop=1, framerate=fps)
+    images = [path for path in (background_images or []) if path]
+    if background_image and not images:
+        images = [background_image]
+
+    if len(images) == 1:
+        bg = ffmpeg.input(images[0], loop=1, framerate=fps)
         video = bg.filter("scale", width, height).filter("fps", fps=fps)
+    elif len(images) > 1:
+        if duration is not None:
+            total_duration = duration
+        else:
+            probe = ffmpeg.probe(audio_path)
+            total_duration = float(probe["format"]["duration"])
+        segment_duration = total_duration / len(images)
+        segments = []
+        for image_path in images:
+            bg = ffmpeg.input(image_path, loop=1, framerate=fps)
+            segment = (
+                bg.filter("scale", width, height)
+                .filter("fps", fps=fps)
+                .filter("trim", duration=segment_duration)
+                .filter("setpts", "PTS-STARTPTS")
+            )
+            segments.append(segment)
+        video = ffmpeg.concat(*segments, v=1, a=0)
     else:
         video = ffmpeg.input(
             "color=c={}:s={}x{}:r={}".format(background_color.lstrip("#"), width, height, fps),
