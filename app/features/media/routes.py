@@ -759,7 +759,22 @@ async def merge_media_endpoint(
 ):
     media = await get_media_or_404(media_id, db, user_id=current_user.id)
     await verify_media_references_ownership(data.media_ids, current_user.id, db)
-    input_filenames = data.media_ids
+
+    # Resolve public media IDs/stored filenames to actual stored filenames
+    # before handing references to the worker.
+    input_filenames: list[str] = []
+    for ref in data.media_ids:
+        try:
+            ref_uuid = UUID(ref)
+            query = select(Media).where((Media.id == ref_uuid) | (Media.stored_filename == ref))
+        except (ValueError, TypeError):
+            query = select(Media).where(Media.stored_filename == ref)
+        result = await db.execute(query)
+        referenced_media = result.scalars().first()
+        if referenced_media is None:
+            raise HTTPException(status_code=404, detail=f"Media reference not found: {ref}")
+        input_filenames.append(referenced_media.stored_filename)
+
     output_filename = f"{media_id}_merge_{uuid4().hex[:8]}.mp4"
     job = await enqueue_media_job(
         "merge_media_task",
@@ -1018,9 +1033,18 @@ async def append_clips_endpoint(
     media = await get_media_or_404(media_id, db, user_id=current_user.id)
     await verify_media_references_ownership(data.media_ids, current_user.id, db)
     ordered_ids = [media.stored_filename]
-    for m_id in data.media_ids:
-        if m_id != media.stored_filename:
-            ordered_ids.append(m_id)
+    for ref in data.media_ids:
+        try:
+            ref_uuid = UUID(ref)
+            query = select(Media).where((Media.id == ref_uuid) | (Media.stored_filename == ref))
+        except (ValueError, TypeError):
+            query = select(Media).where(Media.stored_filename == ref)
+        result = await db.execute(query)
+        referenced_media = result.scalars().first()
+        if referenced_media is None:
+            raise HTTPException(status_code=404, detail=f"Media reference not found: {ref}")
+        if referenced_media.stored_filename not in ordered_ids:
+            ordered_ids.append(referenced_media.stored_filename)
     output_filename = f"{media_id}_append_{uuid4().hex[:8]}.mp4"
     job = await enqueue_media_job(
         "merge_media_task",
