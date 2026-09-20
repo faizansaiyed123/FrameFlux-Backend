@@ -21,6 +21,7 @@ from app.features.subtitles.service import (
     shift_subtitle_timestamps,
     update_subtitle_text,
     update_subtitle_timing,
+    add_subtitle_entry,
 )
 from app.features.subtitles.schemas import SubtitleBurnRequest, SubtitleSyncRequest, SubtitleEditRequest, SubtitleTrackResponse
 
@@ -207,8 +208,8 @@ async def edit_subtitle(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if data.operation not in {"update_text", "update_timing"}:
-        raise HTTPException(status_code=400, detail="Only subtitle text and timing editing are currently supported")
+    if data.operation not in {"update_text", "update_timing", "add_entry"}:
+        raise HTTPException(status_code=400, detail="Only supported subtitle editing operations are available")
     if data.entry_index is None:
         raise HTTPException(status_code=422, detail="entry_index is required for subtitle editing")
 
@@ -233,13 +234,22 @@ async def edit_subtitle(
                 data.entry_index,
                 data.text,
             )
-        else:
+        elif data.operation == "update_timing":
             update_subtitle_timing(
                 str(subtitle_file),
                 str(output_path),
                 data.entry_index,
                 data.start,
                 data.end,
+            )
+        else:
+            add_subtitle_entry(
+                str(subtitle_file),
+                str(output_path),
+                data.entry_index,
+                data.start,
+                data.end,
+                data.text,
             )
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
