@@ -24,6 +24,7 @@ class AudioEditRequest(BaseModel):
 
 class AudioToVideoRequest(BaseModel):
     background_image: str | None = Field(default=None, description="Stored filename of background image")
+    background_images: list[str] | None = Field(default=None, description="Ordered stored filenames for a background slideshow")
     background_color: str | None = Field(default="#000000", description="Hex color for solid background")
     title: str | None = Field(default=None, max_length=255)
     artist: str | None = Field(default=None, max_length=255)
