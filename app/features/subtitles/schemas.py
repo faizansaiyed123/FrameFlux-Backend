@@ -14,6 +14,7 @@ class SubtitleTrackResponse(BaseModel):
 
 
 class SubtitleEditRequest(BaseModel):
+    subtitle_path: str
     operation: Literal["update_text", "update_timing", "add_entry", "delete_entry", "split_entry", "merge_entries", "change_position", "change_font", "change_size", "change_color", "change_background", "change_alignment"]
     entry_index: int | None = None
     start: float | None = None
