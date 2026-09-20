@@ -23,6 +23,7 @@ from app.features.subtitles.service import (
     update_subtitle_timing,
     add_subtitle_entry,
     delete_subtitle_entry,
+    split_subtitle_entry,
 )
 from app.features.subtitles.schemas import SubtitleBurnRequest, SubtitleSyncRequest, SubtitleEditRequest, SubtitleTrackResponse
 
@@ -209,7 +210,7 @@ async def edit_subtitle(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if data.operation not in {"update_text", "update_timing", "add_entry", "delete_entry"}:
+    if data.operation not in {"update_text", "update_timing", "add_entry", "delete_entry", "split_entry"}:
         raise HTTPException(status_code=400, detail="Only supported subtitle editing operations are available")
     if data.entry_index is None:
         raise HTTPException(status_code=422, detail="entry_index is required for subtitle editing")
@@ -252,11 +253,20 @@ async def edit_subtitle(
                 data.end,
                 data.text,
             )
-        else:
+        elif data.operation == "delete_entry":
             delete_subtitle_entry(
                 str(subtitle_file),
                 str(output_path),
                 data.entry_index,
+            )
+        else:
+            if data.start is None:
+                raise HTTPException(status_code=422, detail="start is required as the split timestamp")
+            split_subtitle_entry(
+                str(subtitle_file),
+                str(output_path),
+                data.entry_index,
+                data.start,
             )
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
