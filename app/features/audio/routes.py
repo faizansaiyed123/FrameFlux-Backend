@@ -238,6 +238,7 @@ async def audio_to_video_endpoint(
     output_path = Path(settings.processed_dir) / output_filename
 
     bg_image = get_uploaded_file(data.background_image) if data.background_image else None
+    bg_images = [get_uploaded_file(filename) for filename in data.background_images] if data.background_images else None
     watermark_path = get_uploaded_file(data.watermark) if data.watermark else None
 
     await asyncio.to_thread(
@@ -245,6 +246,7 @@ async def audio_to_video_endpoint(
         str(audio_path),
         str(output_path),
         background_image=bg_image,
+        background_images=bg_images,
         background_color=data.background_color,
         title=data.title,
         text=data.text,
