@@ -38,6 +38,7 @@ class SubtitleBurnRequest(BaseModel):
 
 
 class SubtitleSyncRequest(BaseModel):
+    subtitle_path: str
     offset_seconds: float = 0.0
     scale: float = 1.0
     preview: bool = False
