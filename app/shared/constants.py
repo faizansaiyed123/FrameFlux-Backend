@@ -1,75 +1,28 @@
 """Shared constants across the FrameFlux backend."""
 
-# Configurable defaults (bytes)
-DEFAULT_MAX_UPLOAD_SIZE_BYTES = 500 * 1024 * 1024  # 500 MB
-DEFAULT_MAX_CHUNK_SIZE_BYTES = 50 * 1024 * 1024   # 50 MB
+DEFAULT_MAX_UPLOAD_SIZE_BYTES = 500 * 1024 * 1024
+DEFAULT_MAX_CHUNK_SIZE_BYTES = 50 * 1024 * 1024
 
 ALLOWED_EXTENSIONS = {
-    ".mp4",
-    ".mov",
-    ".avi",
-    ".mkv",
-    ".webm",
-    ".mp3",
-    ".wav",
-    ".m4a",
-    ".aiff",
-    ".aif",
-    ".wma",
-    ".ogg",
-    ".flac",
-    ".opus",
-    ".jpg",
-    ".jpeg",
-    ".png",
-    ".webp",
-    ".gif",
-    ".bmp",
-    ".tiff",
-    ".tif",
-    ".srt",
-    ".vtt",
-    ".ass",
+    ".mp4", ".mov", ".avi", ".mkv", ".webm",
+    ".mp3", ".wav", ".m4a", ".aiff", ".aif", ".wma",
+    ".ogg", ".flac", ".opus",
+    ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp",
+    ".tiff", ".tif",
+    ".srt", ".vtt", ".ass",
 }
 
-VIDEO_EXTENSIONS = {
-    ".mp4",
-    ".mov",
-    ".avi",
-    ".mkv",
-    ".webm",
-}
-
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 AUDIO_EXTENSIONS = {
-    ".mp3",
-    ".wav",
-    ".m4a",
-    ".aiff",
-    ".aif",
-    ".wma",
-    ".ogg",
-    ".flac",
-    ".opus",
+    ".mp3", ".wav", ".m4a", ".aiff", ".aif", ".wma",
+    ".ogg", ".flac", ".opus",
 }
-
 IMAGE_EXTENSIONS = {
-    ".jpg",
-    ".jpeg",
-    ".png",
-    ".webp",
-    ".gif",
-    ".bmp",
-    ".tiff",
-    ".tif",
+    ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp",
+    ".tiff", ".tif",
 }
+SUBTITLE_EXTENSIONS = {".srt", ".vtt", ".ass"}
 
-SUBTITLE_EXTENSIONS = {
-    ".srt",
-    ".vtt",
-    ".ass",
-}
-
-# Mapping extensions to standard MIME types
 EXTENSION_TO_MIME = {
     ".mp4": "video/mp4",
     ".mov": "video/quicktime",
@@ -98,46 +51,19 @@ EXTENSION_TO_MIME = {
     ".ass": "text/plain",
 }
 
-# Recognized media MIME types
 ALLOWED_MIME_TYPES = {
-    "video/mp4",
-    "video/quicktime",
-    "video/x-msvideo",
-    "video/x-matroska",
-    "video/webm",
-    "video/avi",
-    "video/msvideo",
-    "audio/mpeg",
-    "audio/mp3",
-    "audio/wav",
-    "audio/wave",
-    "audio/x-wav",
-    "audio/x-pn-wav",
-    "audio/mp4",
-    "audio/m4a",
-    "audio/x-m4a",
-    "audio/aac",
-    "audio/ogg",
-    "audio/aiff",
-    "audio/x-aiff",
-    "audio/x-ms-wma",
-    "audio/flac",
-    "audio/opus",
-    "image/jpeg",
-    "image/png",
-    "image/webp",
-    "image/gif",
-    "image/bmp",
-    "image/tiff",
-    "text/plain",
-    "text/vtt",
-    "application/x-subrip",
-    "text/x-subrip",
-    "text/srt",
-    "application/octet-stream",
+    "video/mp4", "video/quicktime", "video/x-msvideo",
+    "video/x-matroska", "video/webm", "video/avi", "video/msvideo",
+    "audio/mpeg", "audio/mp3", "audio/wav", "audio/wave",
+    "audio/x-wav", "audio/x-pn-wav", "audio/mp4", "audio/m4a",
+    "audio/x-m4a", "audio/aac", "audio/ogg", "audio/aiff",
+    "audio/x-aiff", "audio/x-ms-wma", "audio/flac", "audio/opus",
+    "image/jpeg", "image/png", "image/webp", "image/gif",
+    "image/bmp", "image/tiff",
+    "text/plain", "text/vtt", "application/x-subrip",
+    "text/x-subrip", "text/srt", "application/octet-stream",
 }
 
-# Explicitly disallowed / dangerous MIME types
 DISALLOWED_MIME_PREFIXES = (
     "application/x-dosexec",
     "application/x-executable",

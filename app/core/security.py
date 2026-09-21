@@ -39,7 +39,11 @@ def create_access_token(
     }
     if extra_claims:
         claims.update(extra_claims)
-    return jwt.encode(claims, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    return jwt.encode(
+        claims,
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
 
 
 def decode_access_token(token: str) -> dict[str, Any]:
