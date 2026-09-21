@@ -32,6 +32,8 @@ from app.features.search.routes import router as search_router
 from app.features.notifications.routes import router as notifications_router
 from app.features.ui.routes import router as ui_router
 from app.features.images.routes import router as images_router
+from app.features.export.routes import router as export_router
+from app.features.metadata.routes import router as metadata_router
 
 app = FastAPI(
     title="FrameFlux API",
@@ -87,4 +89,6 @@ app.include_router(search_router)
 app.include_router(notifications_router)
 app.include_router(ui_router)
 app.include_router(images_router)
+app.include_router(export_router)
+app.include_router(metadata_router)
 
