@@ -10,7 +10,17 @@ settings = get_settings()
 
 
 def get_uploaded_file(filename: str) -> Path:
-    return Path(settings.upload_dir) / filename
+    """Resolve a stored filename strictly inside the configured upload directory."""
+    if not filename or not isinstance(filename, str):
+        raise ValueError("Media filename is required")
+
+    storage_dir = Path(settings.upload_dir).resolve()
+    candidate = (storage_dir / filename).resolve()
+    try:
+        candidate.relative_to(storage_dir)
+    except ValueError as exc:
+        raise ValueError("Invalid media filename") from exc
+    return candidate
 
 
 def process_media(media_id: UUID, stored_filename: str) -> str:
