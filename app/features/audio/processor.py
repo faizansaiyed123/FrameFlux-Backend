@@ -349,7 +349,10 @@ def create_video_from_audio(
         video = ffmpeg.overlay(video, ffmpeg.input(watermark))
 
     if show_waveform and visualizer_style:
-        video = video.filter("showwaves", mode=visualizer_style, rate=30)
+        # FFmpeg's showwaves filter does not expose a "circle" mode. Keep the
+        # public API's circle option and map it to the closest supported mode.
+        waveform_mode = {"circle": "cline"}.get(visualizer_style, visualizer_style)
+        video = video.filter("showwaves", mode=waveform_mode, rate=30)
 
     _run(
         ffmpeg.output(video, audio, output_path, vcodec=vcodec, acodec=acodec, shortest=None, pix_fmt="yuv420p")
