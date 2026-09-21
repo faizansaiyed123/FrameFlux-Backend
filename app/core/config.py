@@ -23,20 +23,16 @@ class Settings(BaseSettings):
     ffmpeg_binary: str = "ffmpeg"
     ffprobe_binary: str = "ffprobe"
 
-    # Configurable file-size limits
-    max_upload_size_bytes: int = 500 * 1024 * 1024  # 500 MB
-    max_chunk_size_bytes: int = 50 * 1024 * 1024   # 50 MB
+    max_upload_size_bytes: int = 500 * 1024 * 1024
+    max_chunk_size_bytes: int = 50 * 1024 * 1024
 
-    # Worker limits
-    worker_job_timeout: int = 3600  # 1 hour
+    worker_job_timeout: int = 3600
     worker_max_jobs: int = 4
 
-    # Resource limits
-    max_video_duration_seconds: int = 7200  # 2 hours
-    max_video_resolution: int = 3840  # 4K width
+    max_video_duration_seconds: int = 7200
+    max_video_resolution: int = 3840
     max_concurrent_jobs_per_user: int = 10
 
-    # Auth / JWT settings
     jwt_secret_key: str
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60
@@ -54,6 +50,16 @@ class Settings(BaseSettings):
 
     def get_worker_max_jobs(self) -> int:
         return self.worker_max_jobs
+
+    @property
+    def allowed_app_origins(self) -> list[str]:
+        return list(
+            dict.fromkeys(
+                origin.strip()
+                for origin in self.app_origin.split(",")
+                if origin.strip()
+            )
+        )
 
 
 @lru_cache
