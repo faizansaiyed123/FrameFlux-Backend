@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     app_origin: str = "http://localhost:3000"
     api_base_url: str = "http://localhost:8000"
     storage_base_url: str = "http://localhost:8000"
+    trust_proxy_headers: bool = False
 
     upload_dir: str = "storage/uploads"
     processed_dir: str = "storage/processed"
