@@ -3,7 +3,7 @@ from html import escape
 from pathlib import Path
 import hashlib
 import hmac
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse, HTMLResponse
@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.security import verify_password
 from app.features.auth.dependencies import get_current_active_user
 from app.features.auth.models import User
 from app.features.media.models import Media
@@ -54,9 +55,12 @@ def _verify_password(share: ShareLink, password: str | None) -> None:
     stored = share.password
     if stored.startswith("sha256$"):
         candidate = "sha256$" + hashlib.sha256(password.encode("utf-8")).hexdigest()
+        valid = hmac.compare_digest(candidate, stored)
+    elif stored.startswith("$argon2"):
+        valid = verify_password(password, stored)
     else:
-        candidate = password
-    if not hmac.compare_digest(candidate, stored):
+        valid = hmac.compare_digest(password, stored)
+    if not valid:
         raise HTTPException(status_code=403, detail="Invalid share password")
 
 
@@ -168,13 +172,12 @@ async def stream_shared_media(token: str, request: Request, db: AsyncSession = D
     if not safe_path.is_file():
         raise HTTPException(status_code=404, detail="Media file not found")
 
-    response = FileResponse(
+    return FileResponse(
         path=safe_path,
         media_type=media.mime_type,
         filename=media.original_filename,
+        content_disposition_type=disposition,
     )
-    response.headers["Content-Disposition"] = f"{disposition}; filename*=UTF-8''{urlparse('http://x/' + media.original_filename).path.rsplit('/',1)[-1]}"
-    return response
 
 
 @router.get("/{token}", response_model=ShareResponse)
