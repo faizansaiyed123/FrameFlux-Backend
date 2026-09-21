@@ -23,5 +23,5 @@ async def create_thumbnail_set(input_path: str, media_id: str, interval: float =
     width_suffix = f"_{width}w" if width else ""
     output_dir_final = output_dir / f"set{width_suffix}"
     output_dir_final.mkdir(parents=True, exist_ok=True)
-    files = generate_thumbnails_interval(input_path, str(output_dir_final), interval=interval, width=width)
+    files = generate_thumbnails_interval(input_path, str(output_dir_final), interval=interval, width=width, fmt=fmt)
     return [str(Path(f).relative_to(Path(settings.processed_dir))) for f in files]
