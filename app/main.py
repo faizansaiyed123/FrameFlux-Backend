@@ -1,11 +1,15 @@
-# app/main.py
-from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
+import logging
+import uuid
+
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
 
 from app.core.config import get_settings
+from app.core.exceptions import AppError, RateLimitedError
+from app.core.logging import configure_logging, get_logger, request_id_var
 from app.features.auth.routes import router as auth_router
 from app.features.health.routes import router as health_router
 from app.features.jobs.routes import router as jobs_router
@@ -35,33 +39,149 @@ from app.features.images.routes import router as images_router
 from app.features.export.routes import router as export_router
 from app.features.metadata.routes import router as metadata_router
 
+settings = get_settings()
+configure_logging(level="DEBUG" if settings.debug else "INFO")
+logger = get_logger(__name__)
+
 app = FastAPI(
-    title="FrameFlux API",
+    title=settings.app_name,
+    version=settings.app_version,
 )
 
-# Always allow localhost:3000 for development frontend
+_allowed_origins = list(
+    dict.fromkeys(
+        origin.strip()
+        for origin in (
+            f"{settings.app_origin},http://localhost:3000"
+        ).split(",")
+        if origin.strip()
+    )
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
         response.headers["x-content-type-options"] = "nosniff"
-        response.headers["x-frame-options"] = "DENY"
         response.headers["referrer-policy"] = "strict-origin-when-cross-origin"
+        # Public share players are intentionally embeddable. Setting DENY
+        # globally would silently break the product's iframe sharing feature.
+        if not request.url.path.startswith("/sharing/player/"):
+            response.headers["x-frame-options"] = "DENY"
         return response
 
+
+class RequestIdMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        incoming = request.headers.get("x-request-id")
+        request_id = incoming or str(uuid.uuid4())
+        token = request_id_var.set(request_id)
+        try:
+            response = await call_next(request)
+        finally:
+            request_id_var.reset(token)
+        response.headers["x-request-id"] = request_id
+        return response
+
+
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestIdMiddleware)
+
+
+def _error_envelope(
+    code: str,
+    message: str,
+    details: dict | None = None,
+) -> dict:
+    return {
+        "error": {
+            "code": code,
+            "message": message,
+            "details": details or {},
+        },
+        "request_id": request_id_var.get(),
+    }
+
+
+@app.exception_handler(AppError)
+async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
+    headers: dict[str, str] | None = None
+    if isinstance(exc, RateLimitedError) and exc.retry_after_seconds is not None:
+        headers = {"Retry-After": str(exc.retry_after_seconds)}
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=_error_envelope(exc.code, exc.message, exc.details),
+        headers=headers,
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(
+    request: Request,
+    exc: HTTPException,
+) -> JSONResponse:
+    detail = exc.detail if isinstance(exc.detail, str) else "Request failed"
+    headers = dict(exc.headers or {})
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=_error_envelope(
+            f"HTTP_{exc.status_code}",
+            detail,
+        ),
+        headers=headers or None,
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    request: Request,
+    exc: RequestValidationError,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content=_error_envelope(
+            "VALIDATION_ERROR",
+            "Request validation failed",
+            {"errors": exc.errors()},
+        ),
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(
+    request: Request,
+    exc: Exception,
+) -> JSONResponse:
+    logger.error(
+        "Unhandled exception",
+        exc_info=exc,
+        extra={
+            "extra_fields": {
+                "path": request.url.path,
+                "method": request.method,
+            }
+        },
+    )
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content=_error_envelope(
+            "INTERNAL_ERROR",
+            "An unexpected error occurred",
+        ),
+    )
 
 
 @app.get("/", include_in_schema=False)
 def root():
     return RedirectResponse(url="/docs")
+
 
 app.include_router(auth_router)
 app.include_router(health_router)
@@ -91,4 +211,3 @@ app.include_router(ui_router)
 app.include_router(images_router)
 app.include_router(export_router)
 app.include_router(metadata_router)
-
