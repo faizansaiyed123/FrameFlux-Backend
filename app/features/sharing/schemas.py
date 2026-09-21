@@ -17,7 +17,7 @@ class ShareResponse(BaseModel):
     id: UUID
     media_id: UUID
     token: str
-    password: str | None
+    has_password: bool = False
     expires_at: datetime | None
     is_active: bool
     allow_download: bool
