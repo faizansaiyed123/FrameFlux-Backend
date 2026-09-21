@@ -128,7 +128,10 @@ def convert_media(
 
     format_settings = SUPPORTED_FORMATS[output_format]
 
-    # Resolve audio codec
+    # Resolve codecs, then enforce container-compatible combinations. API clients
+    # often send a generic h264/aac pair even when the selected container requires
+    # a different codec (for example WebM or MPEG).
+    resolved_vcodec = CODECS.get(video_codec, format_settings["vcodec"])
     resolved_acodec = format_settings["acodec"]
     disable_audio = False
     if audio_codec:
@@ -138,8 +141,18 @@ def convert_media(
         else:
             resolved_acodec = AUDIO_CODECS.get(normalized_acodec, normalized_acodec)
 
+    if output_format == "webm":
+        if resolved_vcodec not in {"libvpx", "libvpx-vp9", "libaom-av1"}:
+            resolved_vcodec = "libvpx-vp9"
+        if not disable_audio and resolved_acodec not in {"libopus", "libvorbis"}:
+            resolved_acodec = "libopus"
+    elif output_format == "mpeg":
+        resolved_vcodec = "mpeg2video"
+        if not disable_audio:
+            resolved_acodec = "mp2"
+
     kwargs: dict[str, Any] = {
-        "vcodec": CODECS.get(video_codec, format_settings["vcodec"]),
+        "vcodec": resolved_vcodec,
         "acodec": resolved_acodec,
     }
     if disable_audio:
@@ -158,7 +171,10 @@ def convert_media(
             raise ValueError(f"Unsupported compression preset: {compression_preset}")
 
     if quality is not None:
-        kwargs["crf"] = quality
+        if output_format == "mpeg":
+            kwargs["qscale:v"] = quality
+        else:
+            kwargs["crf"] = quality
 
     if bitrate:
         kwargs["video_bitrate"] = bitrate
