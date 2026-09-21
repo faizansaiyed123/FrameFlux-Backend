@@ -50,12 +50,19 @@ def generate_thumbnails_interval(input_path: str, output_dir: str, interval: flo
         return []
 
     Path(output_dir).mkdir(parents=True, exist_ok=True)
+    if interval <= 0:
+        raise ValueError("Thumbnail interval must be greater than zero")
+
     output_files = []
-    for i, t in enumerate(range(0, int(duration), int(interval))):
+    index = 0
+    timestamp = 0.0
+    while timestamp < duration:
         ext = "png" if fmt == "png" else "webp" if fmt == "webp" else "jpg"
-        output_file = str(Path(output_dir) / f"thumb_{i:04d}.{ext}")
-        generate_thumbnail(input_path, output_file, timestamp=float(t), width=width, fmt=fmt)
+        output_file = str(Path(output_dir) / f"thumb_{index:04d}.{ext}")
+        generate_thumbnail(input_path, output_file, timestamp=timestamp, width=width, fmt=fmt)
         output_files.append(output_file)
+        index += 1
+        timestamp += interval
     return output_files
 
 
