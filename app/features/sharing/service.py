@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from uuid import UUID, uuid4
+from datetime import timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.features.sharing.models import ShareLink
 from app.features.sharing.schemas import ShareCreate
 from app.core.config import get_settings
+from app.core.security import hash_password
 
 
 async def create_share_link(db: AsyncSession, data: ShareCreate, user_id: UUID | None) -> ShareLink:
@@ -18,7 +20,7 @@ async def create_share_link(db: AsyncSession, data: ShareCreate, user_id: UUID |
         user_id=user_id,
         media_id=data.media_id,
         token=token,
-        password=data.password,
+        password=hash_password(data.password) if data.password else None,
         expires_at=expires_at,
         allow_download=data.allow_download,
         allowed_domains=data.allowed_domains,
@@ -31,7 +33,16 @@ async def create_share_link(db: AsyncSession, data: ShareCreate, user_id: UUID |
 
 async def get_share_link(db: AsyncSession, token: str) -> ShareLink | None:
     result = await db.execute(select(ShareLink).where(ShareLink.token == token))
-    return result.scalar_one_or_none()
+    share = result.scalar_one_or_none()
+    if share is None:
+        return None
+    if share.expires_at is not None:
+        expires_at = share.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at <= datetime.now(timezone.utc):
+            return None
+    return share
 
 
 async def list_share_links(db: AsyncSession, user_id: UUID | None) -> list[ShareLink]:
