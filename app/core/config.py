@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     redis_url: str
 
     app_origin: str = "http://localhost:3000"
+    api_base_url: str = "http://localhost:8000"
+    storage_base_url: str = "http://localhost:8000"
 
     upload_dir: str = "storage/uploads"
     processed_dir: str = "storage/processed"
