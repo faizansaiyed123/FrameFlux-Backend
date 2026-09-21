@@ -50,7 +50,7 @@ class RateLimiter:
                     }
                 },
             )
-            return False, 0
+            return False, -1
 
 
 async def check_rate_limit(
