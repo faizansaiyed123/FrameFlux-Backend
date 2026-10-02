@@ -319,7 +319,7 @@ async def sync_audio_video_endpoint(
         raise HTTPException(status_code=400, detail="Media must be a video file")
 
     input_path = get_uploaded_file(media.stored_filename)
-    audio_file = get_uploaded_file(data.audio_path)
+    audio_file = await _get_owned_media_file(data.audio_path, current_user, db)
     output_filename = f"{media_id}_synced_{uuid4().hex[:8]}.{data.output_format}"
     output_path = get_uploaded_file(output_filename)
 
