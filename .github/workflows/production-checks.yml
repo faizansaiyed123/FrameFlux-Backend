@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    branches: [main, prod-reconcile-20261002]
 
 jobs:
   backend:
