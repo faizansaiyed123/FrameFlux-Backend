@@ -49,4 +49,5 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --frozen
       - run: python -m compileall -q app
+      - run: uv run alembic upgrade head
       - run: uv run pytest -q
