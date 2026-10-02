@@ -310,7 +310,12 @@ async def sync_subtitles(
     shifted_subtitle_path = Path(settings.temp_dir) / f"{media_id}_subtitle_shift_{uuid4().hex}{subtitle_file.suffix}"
 
     try:
-        shift_subtitle_timestamps(str(subtitle_file), str(shifted_subtitle_path), data.offset_seconds)
+        shift_subtitle_timestamps(
+            str(subtitle_file),
+            str(shifted_subtitle_path),
+            data.offset_seconds,
+            data.scale,
+        )
 
         video_input = ffmpeg.input(str(input_path))
         subtitle_input = ffmpeg.input(str(shifted_subtitle_path))
