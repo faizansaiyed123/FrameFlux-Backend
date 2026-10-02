@@ -985,7 +985,7 @@ async def reorder_clips_endpoint(
             query = query.where(Media.stored_filename == ref)
 
         result = await db.execute(query)
-        referenced_media = result.scalars().first()
+        referenced_media = result.scalar_one_or_none()
 
         if referenced_media is None:
             raise HTTPException(
