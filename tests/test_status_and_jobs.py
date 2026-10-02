@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 from fastapi.testclient import TestClient
 from arq.jobs import JobStatus, JobResult, JobDef
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.main import app
 from app.infrastructure.database import get_db
