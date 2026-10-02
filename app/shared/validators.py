@@ -66,8 +66,18 @@ def validate_mime_type(content_type: str | None, extension: str) -> str:
         valid = cleaned_mime in ALLOWED_MIME_TYPES
 
     if not valid:
+        if extension in VIDEO_EXTENSIONS:
+            category = "video"
+        elif extension in AUDIO_EXTENSIONS:
+            category = "audio"
+        elif extension in IMAGE_EXTENSIONS:
+            category = "image"
+        elif extension in SUBTITLE_EXTENSIONS:
+            category = "subtitle"
+        else:
+            category = "media"
         raise ValueError(
-            f"MIME type '{content_type}' is invalid for extension '{extension}'"
+            f"MIME type '{content_type}' is invalid for {category} extension '{extension}'"
         )
     return cleaned_mime
 
