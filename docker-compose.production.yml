@@ -1,52 +1,46 @@
 services:
   postgres:
     image: postgres:17
-    container_name: frameflux-postgres
     environment:
-      POSTGRES_DB: frameflux
-      POSTGRES_USER: frameflux
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U frameflux -d frameflux"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 12
     restart: unless-stopped
 
   redis:
     image: redis:8-alpine
-    container_name: frameflux-redis
     command: ["redis-server", "--appendonly", "yes"]
-    ports:
-      - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 12
     restart: unless-stopped
 
   backend:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: frameflux-backend
     environment:
-      APP_NAME: ${APP_NAME:-FrameFlux API}
-      APP_VERSION: ${APP_VERSION:-0.1.0}
+      APP_NAME: ${APP_NAME:?APP_NAME is required}
+      APP_VERSION: ${APP_VERSION:?APP_VERSION is required}
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      DEBUG: ${DEBUG:-false}
-      ENVIRONMENT: ${ENVIRONMENT:-development}
-      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:3000}
-      API_BASE_URL: ${API_BASE_URL:-http://localhost:8000}
-      STORAGE_BASE_URL: ${STORAGE_BASE_URL:-http://localhost:8000}
+      REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
+      DEBUG: "false"
+      ENVIRONMENT: production
+      APP_ORIGIN: ${APP_ORIGIN:?APP_ORIGIN is required}
+      API_BASE_URL: ${API_BASE_URL:?API_BASE_URL is required}
+      STORAGE_BASE_URL: ${STORAGE_BASE_URL:?STORAGE_BASE_URL is required}
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-true}
       UPLOAD_DIR: ${UPLOAD_DIR:-storage/uploads}
       PROCESSED_DIR: ${PROCESSED_DIR:-storage/processed}
       TEMP_DIR: ${TEMP_DIR:-storage/temp}
@@ -64,10 +58,9 @@ services:
       JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
       PASSWORD_RESET_EXPIRE_MINUTES: ${PASSWORD_RESET_EXPIRE_MINUTES:-15}
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     volumes:
-      - ./app:/app/app
-      - ./storage:/app/storage
+      - media_storage:/app/storage
     depends_on:
       postgres:
         condition: service_healthy
@@ -80,28 +73,34 @@ services:
         "uv run --no-sync alembic upgrade head && exec uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port 8000"
       ]
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
-      interval: 5s
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"
+        ]
+      interval: 10s
       timeout: 5s
       retries: 12
-      start_period: 10s
+      start_period: 15s
     restart: unless-stopped
 
   worker:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: frameflux-worker
     environment:
-      APP_NAME: ${APP_NAME:-FrameFlux API}
-      APP_VERSION: ${APP_VERSION:-0.1.0}
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://frameflux:frameflux@postgres:5432/frameflux}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      DEBUG: ${DEBUG:-false}
-      ENVIRONMENT: ${ENVIRONMENT:-development}
-      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:3000}
-      API_BASE_URL: ${API_BASE_URL:-http://localhost:8000}
-      STORAGE_BASE_URL: ${STORAGE_BASE_URL:-http://localhost:8000}
+      APP_NAME: ${APP_NAME:?APP_NAME is required}
+      APP_VERSION: ${APP_VERSION:?APP_VERSION is required}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
+      DEBUG: "false"
+      ENVIRONMENT: production
+      APP_ORIGIN: ${APP_ORIGIN:?APP_ORIGIN is required}
+      API_BASE_URL: ${API_BASE_URL:?API_BASE_URL is required}
+      STORAGE_BASE_URL: ${STORAGE_BASE_URL:?STORAGE_BASE_URL is required}
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-true}
       UPLOAD_DIR: ${UPLOAD_DIR:-storage/uploads}
       PROCESSED_DIR: ${PROCESSED_DIR:-storage/processed}
       TEMP_DIR: ${TEMP_DIR:-storage/temp}
@@ -114,21 +113,21 @@ services:
       MAX_VIDEO_DURATION_SECONDS: ${MAX_VIDEO_DURATION_SECONDS:-7200}
       MAX_VIDEO_RESOLUTION: ${MAX_VIDEO_RESOLUTION:-3840}
       MAX_CONCURRENT_JOBS_PER_USER: ${MAX_CONCURRENT_JOBS_PER_USER:-10}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-local-only-frameflux-jwt-secret-change-me-32chars}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
       PASSWORD_RESET_EXPIRE_MINUTES: ${PASSWORD_RESET_EXPIRE_MINUTES:-15}
-    command: ["uv", "run", "--no-sync", "arq", "app.infrastructure.worker.WorkerSettings"]
     volumes:
-      - ./app:/app/app
-      - ./storage:/app/storage
+      - media_storage:/app/storage
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    command: ["uv", "run", "--no-sync", "arq", "app.infrastructure.worker.WorkerSettings"]
     restart: unless-stopped
 
 volumes:
   postgres_data:
   redis_data:
+  media_storage:

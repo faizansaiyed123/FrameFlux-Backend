@@ -1,5 +1,6 @@
 from datetime import datetime
 from uuid import UUID
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -16,3 +17,7 @@ class NotificationResponse(BaseModel):
 class NotificationCreate(BaseModel):
     event: str
     message: str
+
+
+class UnreadCountResponse(BaseModel):
+    unread_count: int

@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 from fastapi.testclient import TestClient
 from arq.jobs import JobStatus, JobResult, JobDef
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.main import app
 from app.infrastructure.database import get_db
@@ -144,24 +144,29 @@ def test_get_media_job_alias() -> None:
 
 
 def test_list_jobs() -> None:
-    mock_queued = [
-        {
-            "job_id": "q-1",
-            "status": "queued",
-            "progress": 0,
-            "stage": "In queue",
-            "task_name": "process_media_task",
-            "media_id": "m-1",
-            "enqueue_time": datetime.utcnow().isoformat(),
-        }
-    ]
-    with patch("app.features.jobs.routes.list_queued_jobs", new_callable=AsyncMock) as mock_list:
-        mock_list.return_value = mock_queued
+    job = MagicMock()
+    job.id = uuid4()
+    job.media_id = None
+    job.media_version_id = None
+    job.task_name = "process_media_task"
+    job.status = "queued"
+    job.progress = 0
+    job.stage = "In queue"
+    job.error = None
+    job.operation_type = "process"
+    job.retry_count = 0
+    job.enqueued_at = datetime.now(timezone.utc)
+    job.started_at = None
+    job.finished_at = None
+
+    with patch("app.features.jobs.routes.list_processing_jobs", new_callable=AsyncMock) as mock_list:
+        mock_list.return_value = [job]
         response = client.get("/jobs")
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 1
-        assert data[0]["job_id"] == "q-1"
+        assert data[0]["job_id"] == str(job.id)
+        assert data[0]["status"] == "queued"
 
 
 def test_media_status_endpoint() -> None:

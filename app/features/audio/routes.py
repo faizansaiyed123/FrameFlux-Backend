@@ -39,6 +39,29 @@ from app.features.audio.schemas import (
 )
 
 router = APIRouter(prefix="/audio", tags=["Audio"])
+async def _get_owned_media_file(
+    file_ref: str,
+    current_user: User,
+    db: AsyncSession,
+) -> Path:
+    if not file_ref or ".." in file_ref:
+        raise HTTPException(status_code=400, detail="Invalid media reference")
+
+    query = select(Media).where(Media.user_id == current_user.id)
+    try:
+        file_uuid = UUID(file_ref)
+        query = query.where(
+            (Media.id == file_uuid) | (Media.stored_filename == file_ref)
+        )
+    except (ValueError, TypeError):
+        query = query.where(Media.stored_filename == file_ref)
+
+    result = await db.execute(query)
+    media = result.scalars().first()
+    if media is None:
+        raise HTTPException(status_code=404, detail="Referenced media not found")
+    return get_uploaded_file(media.stored_filename)
+
 
 
 @router.get("/{media_id}/extract")
@@ -145,7 +168,7 @@ async def replace_audio_endpoint(
 
     output_filename = f"{media_id}_replaced_audio_{uuid4().hex[:8]}.mp4"
     input_path = get_uploaded_file(media.stored_filename)
-    audio_file = get_uploaded_file(audio_path)
+    audio_file = await _get_owned_media_file(audio_path, current_user, db)
     output_path = Path(settings.processed_dir) / output_filename
     await asyncio.to_thread(replace_audio, str(input_path), str(audio_file), str(output_path), fade_in, fade_out)
     return {"output_filename": output_filename}
@@ -205,7 +228,10 @@ async def edit_audio_endpoint(
     elif data.operation == "split" and data.start is not None and data.end is not None:
         await asyncio.to_thread(split_audio, str(input_path), str(Path(settings.processed_dir) / f"{media_id}_split"), data.start, data.end)
     elif data.operation == "merge" and data.target_files:
-        target_paths = [str(get_uploaded_file(filename)) for filename in data.target_files]
+        target_paths = [
+            str(await _get_owned_media_file(filename, current_user, db))
+            for filename in data.target_files
+        ]
         await asyncio.to_thread(merge_audio, target_paths, str(output_path))
     elif data.operation == "speed" and data.speed is not None:
         await asyncio.to_thread(change_audio_speed, str(input_path), str(output_path), data.speed)
@@ -237,9 +263,24 @@ async def audio_to_video_endpoint(
     output_filename = f"{media_id}_video_{uuid4().hex[:8]}.{data.output_format}"
     output_path = Path(settings.processed_dir) / output_filename
 
-    bg_image = get_uploaded_file(data.background_image) if data.background_image else None
-    bg_images = [get_uploaded_file(filename) for filename in data.background_images] if data.background_images else None
-    watermark_path = get_uploaded_file(data.watermark) if data.watermark else None
+    bg_image = (
+        await _get_owned_media_file(data.background_image, current_user, db)
+        if data.background_image
+        else None
+    )
+    bg_images = (
+        [
+            await _get_owned_media_file(filename, current_user, db)
+            for filename in data.background_images
+        ]
+        if data.background_images
+        else None
+    )
+    watermark_path = (
+        await _get_owned_media_file(data.watermark, current_user, db)
+        if data.watermark
+        else None
+    )
 
     await asyncio.to_thread(
         create_video_from_audio,
@@ -278,7 +319,7 @@ async def sync_audio_video_endpoint(
         raise HTTPException(status_code=400, detail="Media must be a video file")
 
     input_path = get_uploaded_file(media.stored_filename)
-    audio_file = get_uploaded_file(data.audio_path)
+    audio_file = await _get_owned_media_file(data.audio_path, current_user, db)
     output_filename = f"{media_id}_synced_{uuid4().hex[:8]}.{data.output_format}"
     output_path = get_uploaded_file(output_filename)
 
@@ -295,6 +336,7 @@ async def sync_audio_video_endpoint(
         volume=data.volume,
         mix=data.mix,
         mix_volume=data.mix_volume,
+        output_format=data.output_format,
     )
 
     media.processed_filename = output_filename

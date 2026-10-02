@@ -23,6 +23,7 @@ def sync_audio_video(
     volume: float = 1.0,
     mix: bool = False,
     mix_volume: float = 0.5,
+    output_format: str = "mp4",
 ) -> None:
     """
     Sync external audio with video.
@@ -95,6 +96,13 @@ def sync_audio_video(
         # Replace video audio entirely
         output_audio = audio
 
+    if output_format == "mp4":
+        video_codec, audio_codec = "libx264", "aac"
+    elif output_format == "webm":
+        video_codec, audio_codec = "libvpx-vp9", "libopus"
+    else:
+        raise ValueError("Unsupported output format. Use mp4 or webm.")
+
     # Apply video duration limit to the video stream itself. Reset timestamps so
     # downstream muxing remains valid when the requested duration is shorter.
     video_stream = video.video
@@ -102,7 +110,15 @@ def sync_audio_video(
         video_stream = video_stream.filter("trim", duration=video_duration).filter("setpts", "PTS-STARTPTS")
 
     _run(
-        ffmpeg.output(video_stream, output_audio, output_path, vcodec="libx264", acodec="aac", movflags="+faststart", shortest=None)
+        ffmpeg.output(
+            video_stream,
+            output_audio,
+            output_path,
+            vcodec=video_codec,
+            acodec=audio_codec,
+            **({"movflags": "+faststart"} if output_format == "mp4" else {}),
+            shortest=None,
+        )
         .overwrite_output()
     )
 
