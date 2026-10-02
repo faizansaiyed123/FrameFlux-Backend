@@ -95,7 +95,7 @@ services:
     environment:
       APP_NAME: ${APP_NAME:-FrameFlux API}
       APP_VERSION: ${APP_VERSION:-0.1.0}
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://frameflux:frameflux@postgres:5432/frameflux}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       DEBUG: ${DEBUG:-false}
       ENVIRONMENT: ${ENVIRONMENT:-development}
@@ -114,7 +114,7 @@ services:
       MAX_VIDEO_DURATION_SECONDS: ${MAX_VIDEO_DURATION_SECONDS:-7200}
       MAX_VIDEO_RESOLUTION: ${MAX_VIDEO_RESOLUTION:-3840}
       MAX_CONCURRENT_JOBS_PER_USER: ${MAX_CONCURRENT_JOBS_PER_USER:-10}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-local-only-frameflux-jwt-secret-change-me-32chars}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
       PASSWORD_RESET_EXPIRE_MINUTES: ${PASSWORD_RESET_EXPIRE_MINUTES:-15}
