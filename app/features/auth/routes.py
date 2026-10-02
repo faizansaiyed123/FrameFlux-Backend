@@ -3,6 +3,8 @@ from fastapi.security import HTTPAuthorizationCredentials
 import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
+from app.core.exceptions import RateLimitedError
 from app.infrastructure.database import get_db
 from app.infrastructure.redis import get_redis
 from app.features.auth.dependencies import (
@@ -33,11 +35,13 @@ from app.features.auth.service import (
 )
 
 RATE_LIMITS = {
-    "signup": (500, 60),
-    "login": (500, 60),
-    "forgot_password": (500, 60),
-    "reset_password": (500, 60),
+    "signup": (5, 60),
+    "login": (10, 60),
+    "forgot_password": (5, 60),
+    "reset_password": (5, 60),
 }
+
+settings = get_settings()
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -54,17 +58,16 @@ async def signup_route(
     db: AsyncSession = Depends(get_db),
     redis: aioredis.Redis = Depends(get_redis),
 ) -> User:
-    client_ip = (
-        request.headers.get("x-forwarded-for", request.client.host or "unknown")
-    ).split(",")[0].strip()
+    client_ip = _client_ip(request)
     allowed, count = await check_rate_limit(
         redis, f"auth:signup:{client_ip}", *RATE_LIMITS["signup"]
     )
-    if not allowed:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Too many signup attempts. Try again in {RATE_LIMITS['signup'][1]} seconds.",
-        )
+    _check_limit_result(
+        allowed,
+        count,
+        RATE_LIMITS["signup"][1],
+        "Too many signup attempts.",
+    )
     return await svc_signup(db, payload)
 
 
@@ -80,17 +83,16 @@ async def login_route(
     db: AsyncSession = Depends(get_db),
     redis: aioredis.Redis = Depends(get_redis),
 ) -> TokenResponse:
-    client_ip = (
-        request.headers.get("x-forwarded-for", request.client.host or "unknown")
-    ).split(",")[0].strip()
+    client_ip = _client_ip(request)
     allowed, count = await check_rate_limit(
         redis, f"auth:login:{client_ip}", *RATE_LIMITS["login"]
     )
-    if not allowed:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Too many login attempts. Try again in {RATE_LIMITS['login'][1]} seconds.",
-        )
+    _check_limit_result(
+        allowed,
+        count,
+        RATE_LIMITS["login"][1],
+        "Too many login attempts.",
+    )
     return await svc_login(db, payload)
 
 
@@ -122,17 +124,18 @@ async def forgot_password_route(
     db: AsyncSession = Depends(get_db),
     redis: aioredis.Redis = Depends(get_redis),
 ) -> MessageResponse:
-    client_ip = (
-        request.headers.get("x-forwarded-for", request.client.host or "unknown")
-    ).split(",")[0].strip()
-    allowed, _ = await check_rate_limit(
-        redis, f"auth:forgot_password:{client_ip}", *RATE_LIMITS["forgot_password"]
+    client_ip = _client_ip(request)
+    allowed, count = await check_rate_limit(
+        redis,
+        f"auth:forgot_password:{client_ip}",
+        *RATE_LIMITS["forgot_password"],
     )
-    if not allowed:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Too many password reset requests. Try again in {RATE_LIMITS['forgot_password'][1]} seconds.",
-        )
+    _check_limit_result(
+        allowed,
+        count,
+        RATE_LIMITS["forgot_password"][1],
+        "Too many password reset requests.",
+    )
     await request_password_reset(db, redis, payload.email)
     return MessageResponse(
         detail="If this email is registered, password reset instructions have been sent."
@@ -151,17 +154,18 @@ async def reset_password_route(
     db: AsyncSession = Depends(get_db),
     redis: aioredis.Redis = Depends(get_redis),
 ) -> MessageResponse:
-    client_ip = (
-        request.headers.get("x-forwarded-for", request.client.host or "unknown")
-    ).split(",")[0].strip()
-    allowed, _ = await check_rate_limit(
-        redis, f"auth:reset_password:{client_ip}", *RATE_LIMITS["reset_password"]
+    client_ip = _client_ip(request)
+    allowed, count = await check_rate_limit(
+        redis,
+        f"auth:reset_password:{client_ip}",
+        *RATE_LIMITS["reset_password"],
     )
-    if not allowed:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Too many password reset attempts. Try again in {RATE_LIMITS['reset_password'][1]} seconds.",
-        )
+    _check_limit_result(
+        allowed,
+        count,
+        RATE_LIMITS["reset_password"][1],
+        "Too many password reset attempts.",
+    )
     await svc_reset_password(db, redis, payload)
     return MessageResponse(detail="Password has been reset successfully.")
 
@@ -205,3 +209,36 @@ async def update_me_route(
     db: AsyncSession = Depends(get_db),
 ) -> User:
     return await svc_update_profile(db, current_user, request)
+
+
+def _client_ip(request: Request) -> str:
+    client_host = request.client.host if request.client else "unknown"
+    if settings.trust_proxy_headers:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            candidate = forwarded.split(",", 1)[0].strip()
+            if candidate:
+                return candidate
+        real_ip = request.headers.get("x-real-ip")
+        if real_ip and real_ip.strip():
+            return real_ip.strip()
+    return client_host
+
+
+def _check_limit_result(
+    allowed: bool,
+    count: int,
+    retry_after_seconds: int,
+    message: str,
+) -> None:
+    if count < 0:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Rate limiting service unavailable. Please try again later.",
+            headers={"Retry-After": "5"},
+        )
+    if not allowed:
+        raise RateLimitedError(
+            f"{message} Try again in {retry_after_seconds} seconds.",
+            retry_after_seconds=retry_after_seconds,
+        )
