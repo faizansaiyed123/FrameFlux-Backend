@@ -3,12 +3,16 @@
 Revision ID: 7f2c1e8b9a10
 Revises: e59ad3bb6694
 Create Date: 2026-09-18
+
+The `favorites` table itself is created by 003_account_dashboard_extensions on the
+001-012 branch, which also adds the unique index on (user_id, media_id). This
+revision used to create the same table, which made the two branches mutually
+exclusive: applying both raised DuplicateTable. It is kept in the history (so
+existing databases stamped at 7f2c1e8b9a10 stay valid) but no longer creates
+anything.
 """
 
 from typing import Sequence, Union
-
-from alembic import op
-import sqlalchemy as sa
 
 
 revision: str = "7f2c1e8b9a10"
@@ -18,46 +22,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "favorites",
-        sa.Column("id", sa.UUID(), nullable=False),
-        sa.Column("user_id", sa.UUID(), nullable=False),
-        sa.Column("media_id", sa.UUID(), nullable=False),
-        sa.Column(
-            "created_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.func.now(),
-            nullable=False,
-        ),
-        sa.ForeignKeyConstraint(
-            ["user_id"],
-            ["users.id"],
-            name="fk_favorites_user_id_users",
-            ondelete="CASCADE",
-        ),
-        sa.ForeignKeyConstraint(
-            ["media_id"],
-            ["media.id"],
-            name="fk_favorites_media_id_media",
-            ondelete="CASCADE",
-        ),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index(
-        "ix_favorites_user_id",
-        "favorites",
-        ["user_id"],
-        unique=False,
-    )
-    op.create_index(
-        "ix_favorites_media_id",
-        "favorites",
-        ["media_id"],
-        unique=False,
-    )
+    pass
 
 
 def downgrade() -> None:
-    op.drop_index("ix_favorites_media_id", table_name="favorites")
-    op.drop_index("ix_favorites_user_id", table_name="favorites")
-    op.drop_table("favorites")
+    pass

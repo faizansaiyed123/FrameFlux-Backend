@@ -4,6 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: frameflux-backend
+    command: ["uv", "run", "--no-sync", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     env_file:
       - .env
     ports:
@@ -25,7 +26,7 @@ services:
     container_name: frameflux-worker
     env_file:
       - .env
-    command: ["uv", "run", "arq", "app.infrastructure.worker.WorkerSettings"]
+    command: ["uv", "run", "--no-sync", "arq", "app.infrastructure.worker.WorkerSettings"]
     volumes:
       - ./app:/app/app
       - ./storage:/app/storage
