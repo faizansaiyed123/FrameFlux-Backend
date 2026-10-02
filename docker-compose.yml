@@ -1,41 +1,4 @@
 services:
-  backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: frameflux-backend
-    env_file:
-      - .env
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./app:/app/app
-      - ./storage:/app/storage
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-
-  worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: frameflux-worker
-    env_file:
-      - .env
-    command: ["uv", "run", "arq", "app.infrastructure.worker.WorkerSettings"]
-    volumes:
-      - ./app:/app/app
-      - ./storage:/app/storage
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-
   postgres:
     image: postgres:17
     container_name: frameflux-postgres
@@ -67,6 +30,103 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: frameflux-backend
+    environment:
+      APP_NAME: ${APP_NAME:-FrameFlux API}
+      APP_VERSION: ${APP_VERSION:-0.1.0}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://frameflux:frameflux@postgres:5432/frameflux}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      DEBUG: ${DEBUG:-false}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:3000}
+      API_BASE_URL: ${API_BASE_URL:-http://localhost:8000}
+      STORAGE_BASE_URL: ${STORAGE_BASE_URL:-http://localhost:8000}
+      UPLOAD_DIR: ${UPLOAD_DIR:-storage/uploads}
+      PROCESSED_DIR: ${PROCESSED_DIR:-storage/processed}
+      TEMP_DIR: ${TEMP_DIR:-storage/temp}
+      FFMPEG_BINARY: ${FFMPEG_BINARY:-ffmpeg}
+      FFPROBE_BINARY: ${FFPROBE_BINARY:-ffprobe}
+      MAX_UPLOAD_SIZE_BYTES: ${MAX_UPLOAD_SIZE_BYTES:-524288000}
+      MAX_CHUNK_SIZE_BYTES: ${MAX_CHUNK_SIZE_BYTES:-52428800}
+      WORKER_JOB_TIMEOUT: ${WORKER_JOB_TIMEOUT:-3600}
+      WORKER_MAX_JOBS: ${WORKER_MAX_JOBS:-4}
+      MAX_VIDEO_DURATION_SECONDS: ${MAX_VIDEO_DURATION_SECONDS:-7200}
+      MAX_VIDEO_RESOLUTION: ${MAX_VIDEO_RESOLUTION:-3840}
+      MAX_CONCURRENT_JOBS_PER_USER: ${MAX_CONCURRENT_JOBS_PER_USER:-10}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-local-only-frameflux-jwt-secret-change-me-32chars}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
+      PASSWORD_RESET_EXPIRE_MINUTES: ${PASSWORD_RESET_EXPIRE_MINUTES:-15}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app
+      - ./storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command:
+      [
+        "sh",
+        "-c",
+        "uv run alembic upgrade head && exec uv run uvicorn app.main:app --host 0.0.0.0 --port 8000"
+      ]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: frameflux-worker
+    environment:
+      APP_NAME: ${APP_NAME:-FrameFlux API}
+      APP_VERSION: ${APP_VERSION:-0.1.0}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://frameflux:frameflux@postgres:5432/frameflux}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      DEBUG: ${DEBUG:-false}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:3000}
+      API_BASE_URL: ${API_BASE_URL:-http://localhost:8000}
+      STORAGE_BASE_URL: ${STORAGE_BASE_URL:-http://localhost:8000}
+      UPLOAD_DIR: ${UPLOAD_DIR:-storage/uploads}
+      PROCESSED_DIR: ${PROCESSED_DIR:-storage/processed}
+      TEMP_DIR: ${TEMP_DIR:-storage/temp}
+      FFMPEG_BINARY: ${FFMPEG_BINARY:-ffmpeg}
+      FFPROBE_BINARY: ${FFPROBE_BINARY:-ffprobe}
+      MAX_UPLOAD_SIZE_BYTES: ${MAX_UPLOAD_SIZE_BYTES:-524288000}
+      MAX_CHUNK_SIZE_BYTES: ${MAX_CHUNK_SIZE_BYTES:-52428800}
+      WORKER_JOB_TIMEOUT: ${WORKER_JOB_TIMEOUT:-3600}
+      WORKER_MAX_JOBS: ${WORKER_MAX_JOBS:-4}
+      MAX_VIDEO_DURATION_SECONDS: ${MAX_VIDEO_DURATION_SECONDS:-7200}
+      MAX_VIDEO_RESOLUTION: ${MAX_VIDEO_RESOLUTION:-3840}
+      MAX_CONCURRENT_JOBS_PER_USER: ${MAX_CONCURRENT_JOBS_PER_USER:-10}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-local-only-frameflux-jwt-secret-change-me-32chars}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
+      PASSWORD_RESET_EXPIRE_MINUTES: ${PASSWORD_RESET_EXPIRE_MINUTES:-15}
+    command: ["uv", "run", "arq", "app.infrastructure.worker.WorkerSettings"]
+    volumes:
+      - ./app:/app/app
+      - ./storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
