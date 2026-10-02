@@ -770,7 +770,7 @@ async def merge_media_endpoint(
         except (ValueError, TypeError):
             query = select(Media).where(Media.stored_filename == ref)
         result = await db.execute(query)
-        referenced_media = result.scalars().first()
+        referenced_media = result.scalar_one_or_none()
         if referenced_media is None:
             raise HTTPException(status_code=404, detail=f"Media reference not found: {ref}")
         input_filenames.append(referenced_media.stored_filename)
