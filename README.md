@@ -286,3 +286,203 @@ The test suite covers:
 - **Media Processing & Editing**: Metadata probe, conversions, trims, cuts, splits, overlays, transforms, freeze frames, and clip management.
 - **Status & Progress Tracking**: Real-time Redis progress reporting and task status aggregation.
 - **Jobs & Projects APIs**: Background task tracking, project CRUD, batch processing, and status rollup.
+
+
+## Local automated startup
+
+This repository contains the backend startup entry point:
+
+```bash
+python run.py
+```
+
+It starts the complete backend stack only:
+
+```text
+PostgreSQL
+    ↓
+Redis
+    ↓
+FastAPI API + ARQ worker
+```
+
+The frontend is a separate repository and is not started by this script.
+
+The runner reuses the existing Docker Compose configuration and does not introduce a second process manager. Docker Compose handles the service dependencies and keeps the long-running services attached to the terminal.
+
+Press `Ctrl+C` to stop the stack.
+
+## Docker
+
+From this repository:
+
+```bash
+docker compose config
+docker compose up --build
+```
+
+The Compose stack contains only the services the existing application actually requires:
+
+- PostgreSQL for persistent application data.
+- Redis for ARQ job queuing, rate limiting, resumable upload state, and progress tracking.
+- FastAPI backend.
+- ARQ worker for asynchronous media processing and batch/workflow jobs.
+
+FFmpeg and FFprobe are installed inside the backend/worker image because the existing media-processing code invokes them.
+
+The API is exposed on:
+
+```text
+http://localhost:8000
+```
+
+Health endpoint:
+
+```text
+http://localhost:8000/health
+```
+
+The API container runs the existing Alembic migrations before starting Uvicorn. PostgreSQL and Redis readiness is enforced by the existing Compose health checks and `depends_on` conditions.
+
+## Environment variables
+
+Docker Compose supplies local defaults for the settings required by the application, including:
+
+```text
+DATABASE_URL
+REDIS_URL
+JWT_SECRET_KEY
+APP_ORIGIN
+API_BASE_URL
+STORAGE_BASE_URL
+UPLOAD_DIR
+PROCESSED_DIR
+TEMP_DIR
+FFMPEG_BINARY
+FFPROBE_BINARY
+MAX_UPLOAD_SIZE_BYTES
+MAX_CHUNK_SIZE_BYTES
+WORKER_JOB_TIMEOUT
+WORKER_MAX_JOBS
+MAX_VIDEO_DURATION_SECONDS
+MAX_VIDEO_RESOLUTION
+MAX_CONCURRENT_JOBS_PER_USER
+JWT_ALGORITHM
+JWT_EXPIRE_MINUTES
+PASSWORD_RESET_EXPIRE_MINUTES
+```
+
+You can override Compose values from the shell or a local `.env` file. Do not commit real secrets.
+
+The default `JWT_SECRET_KEY` in Compose is for local development only. Replace it for any non-local deployment.
+
+## Database
+
+The backend uses PostgreSQL through SQLAlchemy's async driver.
+
+Docker Compose starts PostgreSQL with:
+
+```text
+database: frameflux
+user: frameflux
+port: 5432
+```
+
+Database data is persisted in the `postgres_data` named volume.
+
+Migrations are stored under `migrations/` and are executed automatically with:
+
+```bash
+uv run alembic upgrade head
+```
+
+For native development without Docker, start PostgreSQL separately and configure `DATABASE_URL`.
+
+## Redis and background processing
+
+Redis is required by the existing application.
+
+It is used for ARQ background job queues, resumable upload state, upload/media/job progress, and authentication rate limiting.
+
+The ARQ worker loads its task registry from:
+
+```text
+app.infrastructure.worker.WorkerSettings
+```
+
+The worker runs the existing command:
+
+```bash
+uv run arq app.infrastructure.worker.WorkerSettings
+```
+
+No separate Celery or RabbitMQ service is introduced.
+
+## Storage and media processing
+
+Uploads, processed files, and temporary files use the existing local storage directories:
+
+```text
+storage/uploads
+storage/processed
+storage/temp
+```
+
+These directories are bind-mounted into the API and worker containers, so files remain available to both processes.
+
+FFmpeg/FFprobe are installed in the Docker image because the existing processing engine uses them for media inspection and conversion.
+
+## Frontend integration
+
+The frontend is maintained separately in `FrameFlux-Frontend` and uses the existing:
+
+```text
+NEXT_PUBLIC_API_URL
+```
+
+configuration to reach this API.
+
+The default local arrangement is:
+
+```text
+Frontend: http://localhost:3000
+Backend:  http://localhost:8000
+```
+
+The repositories do not share a Compose network or require a specific directory layout.
+
+## Stop
+
+```bash
+docker compose down
+```
+
+To also remove persisted local data:
+
+```bash
+docker compose down -v
+```
+
+For `python run.py`, press `Ctrl+C`.
+
+## Rebuild
+
+```bash
+docker compose up --build
+```
+
+## Native manual startup
+
+The existing native development commands remain available. With PostgreSQL and Redis running and the environment configured:
+
+```bash
+uv sync
+uv run alembic upgrade head
+uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Run the ARQ worker separately when developing without Docker:
+
+```bash
+uv run arq app.infrastructure.worker.WorkerSettings
+```
