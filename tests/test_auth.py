@@ -68,8 +68,57 @@ class MockSession:
 class MockRedis:
     """In-memory mock redis client."""
 
+    class _Pipeline:
+        def __init__(self, redis: "MockRedis") -> None:
+            self.redis = redis
+            self.commands: list[tuple[str, tuple, dict]] = []
+
+        def zremrangebyscore(self, key, minimum, maximum):
+            self.commands.append(("zremrangebyscore", (key, minimum, maximum), {}))
+            return self
+
+        def zadd(self, key, mapping):
+            self.commands.append(("zadd", (key, mapping), {}))
+            return self
+
+        def zcard(self, key):
+            self.commands.append(("zcard", (key,), {}))
+            return self
+
+        def pexpire(self, key, milliseconds):
+            self.commands.append(("pexpire", (key, milliseconds), {}))
+            return self
+
+        async def execute(self):
+            results = []
+            for command, args, kwargs in self.commands:
+                if command == "zremrangebyscore":
+                    key, minimum, maximum = args
+                    entries = self.redis.sorted_sets.get(key, [])
+                    self.redis.sorted_sets[key] = [
+                        item for item in entries
+                        if not (minimum <= item[0] <= maximum)
+                    ]
+                    results.append(None)
+                elif command == "zadd":
+                    key, mapping = args
+                    entries = self.redis.sorted_sets.setdefault(key, [])
+                    entries.extend((score, member) for member, score in mapping.items())
+                    results.append(None)
+                elif command == "zcard":
+                    key = args[0]
+                    results.append(len(self.redis.sorted_sets.get(key, [])))
+                elif command == "pexpire":
+                    results.append(True)
+            self.commands.clear()
+            return results
+
     def __init__(self) -> None:
         self.storage: dict[str, str] = {}
+        self.sorted_sets: dict[str, list[tuple[float, str]]] = {}
+
+    def pipeline(self) -> "_Pipeline":
+        return self._Pipeline(self)
 
     async def get(self, key: str) -> str | None:
         return self.storage.get(key)
