@@ -90,6 +90,7 @@ def _error_envelope(
     details: dict | None = None,
 ) -> dict:
     return {
+        "detail": message,
         "error": {
             "code": code,
             "message": message,
