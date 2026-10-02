@@ -115,8 +115,13 @@ def mux_soft_subtitles(
     )
 
 
-def shift_subtitle_timestamps(subtitle_path: str, output_path: str, offset_seconds: float) -> None:
-    """Shift SRT/VTT/ASS cue timestamps by offset_seconds, clamping at zero."""
+def shift_subtitle_timestamps(
+    subtitle_path: str,
+    output_path: str,
+    offset_seconds: float,
+    scale: float = 1.0,
+) -> None:
+    """Shift subtitle cue timestamps using scale and offset, clamping at zero."""
     import re
 
     source = Path(subtitle_path)
@@ -127,7 +132,7 @@ def shift_subtitle_timestamps(subtitle_path: str, output_path: str, offset_secon
     extension = source.suffix.lower()
 
     def clamp(value: float) -> float:
-        return max(0.0, value + offset_seconds)
+        return max(0.0, value * scale + offset_seconds)
 
     def srt_vtt_time(match: re.Match[str]) -> str:
         raw = match.group(0)
