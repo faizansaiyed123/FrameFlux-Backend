@@ -49,7 +49,6 @@ def sync_audio_video(
     video = ffmpeg.input(video_path)
     audio = ffmpeg.input(audio_path)
 
-    # Apply offset to audio
     if audio_offset != 0:
         if audio_offset > 0:
             # Delay audio: add silence at start
@@ -59,11 +58,9 @@ def sync_audio_video(
             # Advance audio: trim from start
             audio = audio.filter("atrim", start=-audio_offset)
 
-    # Apply duration limits
     if audio_duration:
         audio = audio.filter("atrim", duration=audio_duration)
 
-    # Apply volume to external audio
     audio = audio.filter("volume", volume)
 
     # Apply fade in/out to external audio. FFmpeg requires an explicit
