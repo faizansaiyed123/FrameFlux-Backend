@@ -175,7 +175,6 @@ async def reset_password(
             detail="Invalid or expired reset token",
         )
 
-    # Enforce single-use by deleting the token immediately
     try:
         await redis.delete(key)
     except Exception as exc:

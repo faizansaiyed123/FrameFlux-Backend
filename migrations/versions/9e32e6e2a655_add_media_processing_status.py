@@ -47,7 +47,6 @@ def upgrade() -> None:
         ),
     )
 
-    # Remove the default after existing rows have been populated.
     op.alter_column(
         "media",
         "processing_status",

@@ -40,17 +40,14 @@ async def upload_subtitle_file(
     from app.core.config import get_settings
     settings = get_settings()
     
-    # Validate file extension
     allowed_extensions = {'.srt', '.ass', '.vtt', '.sub', '.txt'}
     file_ext = Path(file.filename).suffix.lower() if file.filename else ''
     if file_ext not in allowed_extensions:
         raise HTTPException(status_code=400, detail=f"Unsupported subtitle format. Allowed: {allowed_extensions}")
     
-    # Generate unique filename
     unique_filename = f"{uuid4().hex}{file_ext}"
     file_path = Path(settings.upload_dir) / unique_filename
     
-    # Save file
     async with aiofiles.open(file_path, 'wb') as f:
         content = await file.read()
         await f.write(content)
@@ -96,10 +93,8 @@ async def burn_subtitles_endpoint(
     output_filename = Path(rel_path).name
     full_path = Path(settings.processed_dir) / output_filename
     
-    # Get file size
     file_size = full_path.stat().st_size if full_path.exists() else 0
     
-    # Get video info using ffprobe
     try:
         probe = ffmpeg.probe(str(full_path))
         video_stream = next((s for s in probe["streams"] if s["codec_type"] == "video"), None)
@@ -119,7 +114,6 @@ async def burn_subtitles_endpoint(
         audio_codec = None
         fps = None
     
-    # Get next version number
     result = await db.execute(
         select(MediaVersion).where(MediaVersion.media_id == media_id).order_by(MediaVersion.version_number.desc())
     )

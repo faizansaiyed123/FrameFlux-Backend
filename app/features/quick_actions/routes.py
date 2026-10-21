@@ -81,7 +81,6 @@ async def execute_quick_action(
 ):
     media = await get_media_or_404(media_id, db, user_id=current_user.id)
 
-    # Video actions that have corresponding async tasks
     video_task_actions = {
         "convert": {"task": "convert_media_task", "format": "mp4"},
         "compress": {"task": "compress_media_task", "format": "mp4"},
@@ -95,14 +94,12 @@ async def execute_quick_action(
         "merge": {"task": "merge_media_task", "format": "mp4"},
     }
 
-    # Audio actions that use direct synchronous endpoints
     audio_direct_actions = {
         "compress", "trim", "cut", "split", "merge",
         "change-volume", "normalize", "fade-in", "fade-out",
         "convert-to-video", "share", "download",
     }
 
-    # Video actions that use direct synchronous endpoints
     video_direct_actions = {
         "extract-audio", "generate-thumbnail", "generate-preview",
         "replace-audio", "add-subtitles", "create-gif",
@@ -110,7 +107,6 @@ async def execute_quick_action(
         "share", "download",
     }
 
-    # Image actions that use direct synchronous endpoints
     image_direct_actions = {
         "convert", "compress", "resize", "crop", "rotate",
         "share", "download",

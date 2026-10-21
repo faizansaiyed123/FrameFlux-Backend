@@ -35,7 +35,6 @@ async def create_batch_job(operation: str, media_ids: list[UUID], options: dict,
         await session.commit()
         await session.refresh(job)
 
-    # Enqueue the batch execution task
     batch_job_id = str(job.id)
     arq_job_id = str(uuid.uuid4())
     pool = await create_worker_pool()

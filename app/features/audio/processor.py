@@ -51,11 +51,9 @@ def sync_audio_video(
 
     if audio_offset != 0:
         if audio_offset > 0:
-            # Delay audio: add silence at start
             silence = ffmpeg.input("anullsrc=r=44100:cl=stereo", f="lavfi", t=audio_offset)
             audio = ffmpeg.concat(silence, audio, v=0, a=1)
         else:
-            # Advance audio: trim from start
             audio = audio.filter("atrim", start=-audio_offset)
 
     if audio_duration:
@@ -63,9 +61,6 @@ def sync_audio_video(
 
     audio = audio.filter("volume", volume)
 
-    # Apply fade in/out to external audio. FFmpeg requires an explicit
-    # start time for fade-out; derive it from the effective audio duration
-    # after offset/duration constraints.
     if fade_in:
         audio = audio.filter("afade", t="in", st=0, d=fade_in)
     if fade_out:
@@ -85,12 +80,10 @@ def sync_audio_video(
         audio = audio.filter("afade", t="out", st=fade_start, d=fade_duration)
 
     if mix:
-        # Mix external audio with original video audio
         original_audio = video.audio.filter("volume", mix_volume)
         mixed_audio = ffmpeg.filter([original_audio, audio], "amix", inputs=2, duration="longest")
         output_audio = mixed_audio
     else:
-        # Replace video audio entirely
         output_audio = audio
 
     if output_format == "mp4":
@@ -100,8 +93,6 @@ def sync_audio_video(
     else:
         raise ValueError("Unsupported output format. Use mp4 or webm.")
 
-    # Apply video duration limit to the video stream itself. Reset timestamps so
-    # downstream muxing remains valid when the requested duration is shorter.
     video_stream = video.video
     if video_duration:
         video_stream = video_stream.filter("trim", duration=video_duration).filter("setpts", "PTS-STARTPTS")
@@ -248,8 +239,6 @@ def apply_fade(
     if fade_in:
         stream = stream.filter("afade", t="in", st=0, d=fade_in)
     if fade_out:
-        # FFmpeg's afade filter needs an explicit start time for a reliable fade-out.
-        # Derive it from the actual input duration and clamp the fade to the stream length.
         probe = ffmpeg.probe(input_path)
         duration = float(probe.get("format", {}).get("duration", 0) or 0)
         if duration <= 0:
@@ -362,8 +351,6 @@ def create_video_from_audio(
         video = ffmpeg.overlay(video, ffmpeg.input(watermark))
 
     if show_waveform and visualizer_style:
-        # FFmpeg's showwaves filter does not expose a "circle" mode. Keep the
-        # public API's circle option and map it to the closest supported mode.
         waveform_mode = {"circle": "cline"}.get(visualizer_style, visualizer_style)
         video = video.filter("showwaves", mode=waveform_mode, rate=30)
 

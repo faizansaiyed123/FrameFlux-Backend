@@ -8,7 +8,7 @@ class ShareCreate(BaseModel):
     password: str | None = None
     expires_in_hours: int | None = None
     allow_download: bool = True
-    allowed_domains: str | None = None  # Comma-separated list of allowed domains for embed
+    allowed_domains: str | None = None  
 
 
 class ShareResponse(BaseModel):

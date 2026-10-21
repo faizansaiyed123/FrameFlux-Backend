@@ -63,7 +63,6 @@ async def readiness(response: Response) -> ReadinessResponse:
     return result
 
 
-# Backwards-compatible liveness endpoint used by existing deployment checks.
 @router.get("", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
     return await liveness()

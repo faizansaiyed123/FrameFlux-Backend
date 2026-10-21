@@ -93,11 +93,9 @@ def validate_aspect_ratio(ratio: str) -> str:
     if num1 <= 0 or num2 <= 0:
         raise ValueError("Aspect ratio values must be greater than zero")
 
-    # If both are integers, keep simple representation (or standard ratio)
     if match.group(1).isdigit() and match.group(2).isdigit():
         return f"{match.group(1)}:{match.group(2)}"
 
-    # If floats are present (e.g. 2.35:1), convert to integer fraction for FFmpeg
     frac = Fraction(num1 / num2).limit_denominator(1000)
     return f"{frac.numerator}:{frac.denominator}"
 
@@ -128,9 +126,6 @@ def convert_media(
 
     format_settings = SUPPORTED_FORMATS[output_format]
 
-    # Resolve codecs, then enforce container-compatible combinations. API clients
-    # often send a generic h264/aac pair even when the selected container requires
-    # a different codec (for example WebM or MPEG).
     resolved_vcodec = CODECS.get(video_codec, format_settings["vcodec"])
     resolved_acodec = format_settings["acodec"]
     disable_audio = False

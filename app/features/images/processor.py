@@ -35,7 +35,6 @@ async def convert_image(
 
     def _convert():
         with Image.open(input_path) as img:
-            # Convert RGBA to RGB for formats that don't support transparency
             if format in ("jpg", "jpeg") and img.mode in ("RGBA", "LA", "P"):
                 background = Image.new("RGB", img.size, (255, 255, 255))
                 if img.mode == "P":
@@ -45,7 +44,6 @@ async def convert_image(
             elif format in ("webp", "png") and img.mode not in ("RGBA", "RGB", "L"):
                 img = img.convert("RGBA")
 
-            # Resize if width/height specified
             if width or height:
                 original_width, original_height = img.size
                 if width and height:
@@ -58,7 +56,6 @@ async def convert_image(
                     new_width, new_height = int(original_width * ratio), height
                 img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
-            # Save with quality setting
             save_kwargs = {}
             if quality is not None:
                 save_kwargs["quality"] = quality
@@ -88,7 +85,6 @@ async def compress_image(
             original_size = Path(input_path).stat().st_size
             original_width, original_height = img.size
 
-            # Resize if max dimensions specified
             if max_width or max_height:
                 if max_width and max_height:
                     ratio = min(max_width / original_width, max_height / original_height)
@@ -102,7 +98,6 @@ async def compress_image(
                     new_height = int(original_height * ratio)
                     img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
-            # Handle transparency for JPEG
             if img.mode in ("RGBA", "LA", "P"):
                 if img.mode == "P":
                     img = img.convert("RGBA")

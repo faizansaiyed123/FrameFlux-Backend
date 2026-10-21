@@ -30,8 +30,6 @@ def extract_audio(input_path: str, output_path: str, format: str = "mp3", bitrat
     elif format == "opus":
         kwargs["acodec"] = "libopus"
     elif format == "aiff":
-        # AIFF commonly uses big-endian PCM. Let the .aiff extension select
-        # the AIFF muxer while explicitly using a compatible PCM codec.
         kwargs["acodec"] = "pcm_s16be"
     else:
         raise ValueError(f"Unsupported audio format: {format}")

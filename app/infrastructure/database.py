@@ -1,4 +1,3 @@
-# app/infrastructure/database.py
 
 from collections.abc import AsyncGenerator
 

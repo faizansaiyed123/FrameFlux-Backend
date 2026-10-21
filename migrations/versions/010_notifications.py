@@ -11,7 +11,6 @@ from alembic import op
 import sqlalchemy as sa
 
 
-# revision identifiers, used by Alembic.
 revision: str = "010_notifications"
 down_revision: Union[str, Sequence[str], None] = "009_project_folders"
 branch_labels: Union[str, Sequence[str], None] = None

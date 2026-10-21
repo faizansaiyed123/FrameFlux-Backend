@@ -21,8 +21,7 @@ from app.shared.validators import (
 
 settings = get_settings()
 
-# Redis key namespace for resumable uploads
-UPLOAD_KEY_PREFIX = "resumable_upload:"  # e.g. resumable_upload:<upload_id>
+UPLOAD_KEY_PREFIX = "resumable_upload:"  
 
 
 def _redis_key(upload_id: UUID) -> str:
@@ -55,13 +54,10 @@ class ResumableUploadService:
         Returns the generated ``upload_id`` which the client must include in
         subsequent chunk, pause/resume, cancel, and finalize calls.
         """
-        # Validate filename and extension
         ext = validate_filename_and_extension(original_filename)
 
-        # Validate total size against configured limit
         validate_file_size(total_size, settings.max_upload_size_bytes)
 
-        # Validate chunk size
         if chunk_size is not None:
             if chunk_size <= 0:
                 raise ValueError("chunk_size must be greater than 0")
@@ -74,9 +70,8 @@ class ResumableUploadService:
 
         upload_id = uuid4()
         stored_filename = f"{uuid4()}{ext}"
-        chunk_size = chunk_size or (1024 * 1024)  # default 1 MiB
+        chunk_size = chunk_size or (1024 * 1024)  
 
-        # Ensure temp directory exists
         _temp_dir(upload_id).mkdir(parents=True, exist_ok=True)
 
         redis = await create_pool(WorkerSettings.redis_settings)
@@ -87,7 +82,7 @@ class ResumableUploadService:
                 "stored_filename": stored_filename,
                 "total_size": str(total_size),
                 "chunk_size": str(chunk_size),
-                "uploaded_chunks": "",  # comma‑separated list
+                "uploaded_chunks": "",  
                 "status": "in_progress",
                 "user_id": str(user_id) if user_id else "",
             },
@@ -102,7 +97,6 @@ class ResumableUploadService:
         await redis.close()
         if not meta:
             raise ValueError("Upload ID not found")
-        # Decode bytes to str (arq returns bytes)
         meta = {k.decode() if isinstance(k, (bytes, bytearray)) else k: v.decode() if isinstance(v, (bytes, bytearray)) else v for k, v in meta.items()}
         if user_id is not None and meta.get("user_id") and meta["user_id"] != str(user_id):
             raise ValueError("Upload ID not found")
@@ -122,15 +116,13 @@ class ResumableUploadService:
         if meta.get("status") not in ("in_progress", "paused"):
             raise ValueError(f"Cannot store chunk when status is {meta.get('status')}")
 
-        # Write chunk to file (overwrite if it already exists – useful for retries)
         chunk_path = _chunk_path(upload_id, index)
         chunk_path.parent.mkdir(parents=True, exist_ok=True)
         with open(chunk_path, "wb") as f:
             f.write(data)
 
-        # Update uploaded_chunks list
         existing = meta.get("uploaded_chunks", "")
-        indices = set(int(i) for i in existing.split(",") if i)  # handle empty string
+        indices = set(int(i) for i in existing.split(",") if i)  
         indices.add(index)
         new_value = ",".join(str(i) for i in sorted(indices))
         redis = await create_pool(WorkerSettings.redis_settings)
@@ -154,11 +146,9 @@ class ResumableUploadService:
     @staticmethod
     async def cancel(upload_id: UUID, user_id: Optional[UUID] = None) -> None:
         await ResumableUploadService._load_meta(upload_id, user_id=user_id)
-        # Remove temporary files
         temp_dir = _temp_dir(upload_id)
         if temp_dir.exists():
             shutil.rmtree(temp_dir)
-        # Delete Redis record
         redis = await create_pool(WorkerSettings.redis_settings)
         await redis.delete(_redis_key(upload_id))
         await redis.close()
@@ -186,19 +176,16 @@ class ResumableUploadService:
                 f"Missing chunks: expected {expected_chunks}, received {len(uploaded)}"
             )
 
-        # Validate size and extension before assembling
         original_filename = meta["original_filename"]
         ext = validate_filename_and_extension(original_filename)
         validate_file_size(total_size, settings.max_upload_size_bytes)
 
-        # Inspect initial chunk content for security / signature check
         first_chunk = _chunk_path(upload_id, 0)
         if first_chunk.exists():
             with open(first_chunk, "rb") as f0:
                 header_data = f0.read(512)
                 validate_file_content(header_data, ext)
 
-        # Assemble chunks in order
         final_path = Path(settings.upload_dir) / meta["stored_filename"]
         final_path.parent.mkdir(parents=True, exist_ok=True)
         with open(final_path, "wb") as dst:
@@ -209,7 +196,6 @@ class ResumableUploadService:
                 with open(part_path, "rb") as src:
                     shutil.copyfileobj(src, dst)
 
-        # Resolve user_id from meta if not passed
         effective_user_id = user_id
         if effective_user_id is None and meta.get("user_id"):
             try:
@@ -217,10 +203,8 @@ class ResumableUploadService:
             except (ValueError, TypeError):
                 pass
 
-        # Clean up temporary directory and Redis entry
         await ResumableUploadService.cancel(upload_id)
 
-        # Create Media ORM object and persist
         stored_filename = meta["stored_filename"]
         media_type = get_media_type(ext)
         mime_type = validate_mime_type(None, ext)

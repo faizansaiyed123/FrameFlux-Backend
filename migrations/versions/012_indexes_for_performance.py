@@ -10,7 +10,6 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-# revision identifiers, used by Alembic.
 revision: str = "012_indexes_for_performance"
 down_revision: str = "011_user_preferences"
 branch_labels: Union[str, Sequence[str], None] = None
@@ -31,8 +30,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # ix_media_user_id and ix_projects_user_id are already created (and dropped
-    # again) by e59ad3bb6694, and the rest are owned by the revisions below, so
-    # only the two indexes this revision introduces are dropped here.
     op.drop_index("ix_share_links_is_active", table_name="share_links", if_exists=True)
     op.drop_index("ix_media_processing_status", table_name="media", if_exists=True)

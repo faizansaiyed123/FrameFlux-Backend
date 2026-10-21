@@ -987,7 +987,6 @@ async def execute_workflow_task(
     engine = ProcessingEngine()
 
     async with AsyncSessionLocal() as db:
-        # Load workflow
         result = await db.execute(
             select(Workflow).where(Workflow.id == UUID(workflow_id))
         )
@@ -1001,7 +1000,6 @@ async def execute_workflow_task(
                 "error": "Workflow not found",
             }
 
-        # Load media
         result = await db.execute(
             select(Media).where(Media.id == UUID(media_id))
         )
@@ -1015,7 +1013,6 @@ async def execute_workflow_task(
                 "error": "Media not found",
             }
 
-        # Create processing job for tracking
         job = await create_processing_job(
             db,
             media_id=media.id,
@@ -1031,10 +1028,8 @@ async def execute_workflow_task(
             await update_processing_job(db, job, status="running", progress=10, stage="Initializing workflow")
             await set_processing_progress(media_id, "processing", 10, job_id=job_id, stage="Initializing workflow", task_name="execute_workflow_task")
 
-            # Parse workflow operations
             workflow_ops = json.loads(workflow.operations) if workflow.operations else []
 
-            # Map workflow operations to ProcessingEngine operations
             processing_ops = _map_workflow_operations(workflow_ops)
 
             if not processing_ops:
@@ -1045,7 +1040,6 @@ async def execute_workflow_task(
             await update_processing_job(db, job, progress=25, stage=f"Running workflow ({len(processing_ops)} operations)")
             await set_processing_progress(media_id, "processing", 25, job_id=job_id, stage=f"Running workflow ({len(processing_ops)} operations)", task_name="execute_workflow_task")
 
-            # Execute through ProcessingEngine
             request = ProcessingRequest(media_id=media_id, operations=processing_ops)
             result = await engine.execute(request)
 
@@ -1099,7 +1093,6 @@ def _map_workflow_operations(workflow_ops: list[dict]) -> list[dict]:
                 "aspect_ratio": params.get("aspect_ratio"),
             })
         elif op_type == "compress":
-            # Map compress to convert with compression settings
             processing_ops.append({
                 "type": "convert",
                 "format": params.get("format", "mp4"),
@@ -1174,7 +1167,6 @@ def _map_workflow_operations(workflow_ops: list[dict]) -> list[dict]:
                 "speed": params.get("speed", 1.0),
             })
         elif op_type == "overlay":
-            # Determine overlay type from params
             if params.get("text"):
                 processing_ops.append({
                     "type": "text_overlay",
@@ -1231,7 +1223,6 @@ async def execute_batch_task(
     engine = ProcessingEngine()
 
     async with AsyncSessionLocal() as db:
-        # Load batch job
         result = await db.execute(
             select(ProcessingJob).where(ProcessingJob.id == UUID(batch_job_id))
         )
@@ -1244,7 +1235,6 @@ async def execute_batch_task(
                 "error": "Batch job not found",
             }
 
-        # Load media items
         media_uuids = [UUID(mid) for mid in media_ids]
         result = await db.execute(
             select(Media).where(Media.id.in_(media_uuids))
@@ -1255,7 +1245,6 @@ async def execute_batch_task(
             await update_processing_job(db, batch_job, status="failed", error="No valid media found")
             return {"status": "failed", "error": "No valid media found"}
 
-        # Map batch operation to ProcessingEngine operations
         processing_ops = _map_batch_operation(operation, options)
         if not processing_ops:
             await update_processing_job(db, batch_job, status="failed", error=f"Unknown batch operation: {operation}")
@@ -1266,12 +1255,10 @@ async def execute_batch_task(
         failed = 0
         results = []
 
-        # Update batch job progress
         await update_processing_job(db, batch_job, status="running", progress=5, stage=f"Starting batch {operation} for {total_items} items")
         await set_processing_progress(batch_job_id, "processing", 5, job_id=job_id, stage=f"Starting batch {operation} for {total_items} items", task_name="execute_batch_task")
 
-        # Process items in parallel (with semaphore to limit concurrency)
-        semaphore = asyncio.Semaphore(3)  # Limit to 3 concurrent processing jobs
+        semaphore = asyncio.Semaphore(3)  
 
         async def process_single_media(media_item: Media, index: int):
             nonlocal completed, failed
@@ -1279,7 +1266,6 @@ async def execute_batch_task(
 
             async with semaphore:
                 try:
-                    # Create individual job for tracking
                     item_job_id = f"{job_id}_item_{index}"
                     await set_processing_progress(media_id, "queued", 0, job_id=item_job_id, stage=f"Queued in batch ({index+1}/{total_items})", task_name="execute_batch_task")
 
@@ -1294,7 +1280,6 @@ async def execute_batch_task(
                         "output_filename": result.get("output_filename"),
                     })
 
-                    # Update batch progress
                     progress = int(5 + (completed + failed) / total_items * 90)
                     await update_processing_job(db, batch_job, progress=progress, stage=f"Completed {completed}/{total_items}")
                     await set_processing_progress(batch_job_id, "processing", progress, job_id=job_id, stage=f"Completed {completed}/{total_items}", task_name="execute_batch_task")
@@ -1308,15 +1293,12 @@ async def execute_batch_task(
                         "error": str(exc)[:500],
                     })
 
-                    # Update batch progress
                     progress = int(5 + (completed + failed) / total_items * 90)
                     await update_processing_job(db, batch_job, progress=progress, stage=f"Completed {completed}/{total_items}, Failed {failed}/{total_items}")
                     await set_processing_progress(batch_job_id, "processing", progress, job_id=job_id, stage=f"Completed {completed}/{total_items}, Failed {failed}/{total_items}", task_name="execute_batch_task")
 
-        # Run all items concurrently
         await asyncio.gather(*[process_single_media(m, i) for i, m in enumerate(media_items)])
 
-        # Final update
         final_status = "completed" if failed == 0 else ("failed" if completed == 0 else "completed")
         await update_processing_job(
             db,
@@ -1439,8 +1421,6 @@ def _map_batch_operation(operation: str, options: dict) -> list[dict]:
             "fade_out": options.get("fade_out"),
         })
     elif operation == "add_subtitles":
-        # Subtitle operations would need a different approach
-        # For now, map to a basic convert
         processing_ops.append({
             "type": "convert",
             "format": options.get("format", "mp4"),
@@ -1503,7 +1483,6 @@ async def convert_audio_task(
                 quality=quality,
             )
 
-            # Create version
             file_size = Path(output_path).stat().st_size if Path(output_path).exists() else 0
             
             result = await db.execute(

@@ -23,9 +23,6 @@ def _make_mock_project(project_id=None, name="Sample Project"):
     )
 
 
-# ---------------------------------------------------------
-# PROJECT CRUD TESTS
-# ---------------------------------------------------------
 
 def test_create_project() -> None:
     mock_project = _make_mock_project(name="Documentary 2026")
@@ -156,9 +153,6 @@ def test_delete_project_success() -> None:
         app.dependency_overrides.pop(get_db, None)
 
 
-# ---------------------------------------------------------
-# PROJECT MEDIA & BATCH PROCESSING TESTS
-# ---------------------------------------------------------
 
 def test_list_project_media() -> None:
     project_id = uuid4()

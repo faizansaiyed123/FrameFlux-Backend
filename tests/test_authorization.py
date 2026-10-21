@@ -62,31 +62,21 @@ def _make_media(user_id, media_id=None, stored="file.mp4"):
     )
 
 
-# ---------------------------------------------------------
-# UNAUTHENTICATED REQUESTS REQUIRE AUTH (401)
-# ---------------------------------------------------------
 
 def test_unauthenticated_requests_fail_with_401():
-    # Ensure no dependency override
     app.dependency_overrides.pop(get_current_active_user, None)
     app.dependency_overrides.pop(get_current_user, None)
 
-    # Projects
     assert client.get("/projects").status_code == 401
     assert client.post("/projects", json={"name": "Test"}).status_code == 401
 
-    # Media
     assert client.get("/media").status_code == 401
     assert client.get(f"/media/{uuid4()}").status_code == 401
     assert client.delete(f"/media/{uuid4()}").status_code == 401
 
-    # Jobs
     assert client.get("/jobs").status_code == 401
 
 
-# ---------------------------------------------------------
-# IDOR PROTECTION: USER CANNOT ACCESS ANOTHER USER'S PROJECT
-# ---------------------------------------------------------
 
 def test_user_cannot_access_other_users_project():
     app.dependency_overrides[get_current_active_user] = lambda: USER_B
@@ -97,22 +87,18 @@ def test_user_cannot_access_other_users_project():
     async def override_db():
         session = AsyncMock()
         mock_result = MagicMock()
-        # Simulates DB returning None when queried for project belonging to USER_B
         mock_result.scalar_one_or_none.return_value = None
         session.execute.return_value = mock_result
         yield session
 
     app.dependency_overrides[get_db] = override_db
     try:
-        # GET returns 404
         resp = client.get(f"/projects/{project_a_id}")
         assert resp.status_code == 404
 
-        # PATCH returns 404
         resp = client.patch(f"/projects/{project_a_id}", json={"name": "Hacked"})
         assert resp.status_code == 404
 
-        # DELETE returns 404
         resp = client.delete(f"/projects/{project_a_id}")
         assert resp.status_code == 404
     finally:
@@ -121,9 +107,6 @@ def test_user_cannot_access_other_users_project():
         app.dependency_overrides.pop(get_current_user, None)
 
 
-# ---------------------------------------------------------
-# IDOR PROTECTION: USER CANNOT ACCESS ANOTHER USER'S MEDIA
-# ---------------------------------------------------------
 
 def test_user_cannot_access_other_users_media():
     app.dependency_overrides[get_current_active_user] = lambda: USER_B
@@ -140,16 +123,13 @@ def test_user_cannot_access_other_users_media():
 
     app.dependency_overrides[get_db] = override_db
     try:
-        # GET another user's media returns 404
         resp = client.get(f"/media/{media_a.id}")
         assert resp.status_code == 404
         assert resp.json()["detail"] == "Media not found"
 
-        # Status returns 404
         resp = client.get(f"/media/{media_a.id}/status")
         assert resp.status_code == 404
 
-        # DELETE returns 404
         resp = client.delete(f"/media/{media_a.id}")
         assert resp.status_code == 404
     finally:
@@ -158,9 +138,6 @@ def test_user_cannot_access_other_users_media():
         app.dependency_overrides.pop(get_current_user, None)
 
 
-# ---------------------------------------------------------
-# IDOR PROTECTION: USER CANNOT MERGE ANOTHER USER'S MEDIA
-# ---------------------------------------------------------
 
 def test_user_cannot_cross_reference_other_users_media():
     app.dependency_overrides[get_current_active_user] = lambda: USER_B
@@ -174,12 +151,10 @@ def test_user_cannot_cross_reference_other_users_media():
 
         async def fake_execute(statement, *args, **kwargs):
             mock_res = MagicMock()
-            # If query is selecting by ID or stored_filename:
             sql_str = str(statement)
             if "media.id = :id_1" in sql_str:
                 mock_res.scalar_one_or_none.return_value = media_b
             else:
-                # Referencing another user's media
                 mock_res.scalars.return_value.first.return_value = media_a
             return mock_res
 

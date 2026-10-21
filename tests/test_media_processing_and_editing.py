@@ -32,9 +32,6 @@ def _make_mock_media(
     )
 
 
-# ---------------------------------------------------------
-# MEDIA PROCESSING ENDPOINT TESTS
-# ---------------------------------------------------------
 
 def test_process_media_success() -> None:
     media_id = uuid4()
@@ -122,9 +119,6 @@ def test_process_media_not_found_returns_404() -> None:
         app.dependency_overrides.pop(get_db, None)
 
 
-# ---------------------------------------------------------
-# CONVERSION & ASPECT RATIO / AUDIO OPTIONS TESTS
-# ---------------------------------------------------------
 
 def test_convert_media_with_aspect_ratio_and_audio() -> None:
     media_id = uuid4()
@@ -161,7 +155,6 @@ def test_convert_media_with_aspect_ratio_and_audio() -> None:
             assert "converted" in data["output_filename"]
             assert data["output_filename"].endswith(".webm")
 
-            # Verify options passed into enqueue_media_job
             call_args = mock_enq.call_args[0]
             assert call_args[0] == "convert_media_task"
             options = call_args[4]
@@ -172,9 +165,6 @@ def test_convert_media_with_aspect_ratio_and_audio() -> None:
         app.dependency_overrides.pop(get_db, None)
 
 
-# ---------------------------------------------------------
-# EDITING ENDPOINT TESTS (TRIM, CUT, EXTRACT)
-# ---------------------------------------------------------
 
 def test_edit_media_trim_success() -> None:
     media_id = uuid4()
@@ -219,9 +209,6 @@ def test_edit_media_invalid_timestamps_returns_400() -> None:
     assert "end time must be greater than start time" in response.json()["detail"].lower()
 
 
-# ---------------------------------------------------------
-# CLIP OPERATIONS (SPLIT, KEEP, DELETE, REORDER, APPEND)
-# ---------------------------------------------------------
 
 def test_split_media_success() -> None:
     media_id = uuid4()
@@ -355,9 +342,6 @@ def test_append_clips_success() -> None:
         app.dependency_overrides.pop(get_db, None)
 
 
-# ---------------------------------------------------------
-# OVERLAYS (SINGLE & MULTI)
-# ---------------------------------------------------------
 
 def test_overlay_single_text_success() -> None:
     media_id = uuid4()
@@ -424,9 +408,6 @@ def test_overlay_multi_array_success() -> None:
         app.dependency_overrides.pop(get_db, None)
 
 
-# ---------------------------------------------------------
-# TRANSFORM, FREEZE FRAME, MERGE & CRUD
-# ---------------------------------------------------------
 
 def test_transform_media_success() -> None:
     media_id = uuid4()

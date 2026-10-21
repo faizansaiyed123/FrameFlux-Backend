@@ -1,4 +1,3 @@
-# app/features/media/processor.py
 
 from pathlib import Path
 from uuid import UUID

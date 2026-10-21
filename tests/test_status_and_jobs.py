@@ -205,7 +205,6 @@ def test_media_status_endpoint() -> None:
             assert data["progress"] == 65
             assert data["job_id"] == "job-100"
 
-            # Check /media/{media_id}/progress returns identical structure
             response_prog = client.get(f"/media/{media_id}/progress")
             assert response_prog.status_code == 200
             assert response_prog.json()["progress"] == 65

@@ -21,7 +21,7 @@ from app.shared.validators import (
 
 settings = get_settings()
 
-CHUNK_SIZE = 1024 * 1024  # 1 MB
+CHUNK_SIZE = 1024 * 1024  
 
 
 async def save_upload(file: UploadFile) -> Media:

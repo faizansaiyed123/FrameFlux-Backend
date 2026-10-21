@@ -124,7 +124,6 @@ async def list_project_media(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # First verify that the project exists and belongs to the current user.
     project = await get_project(db, project_id, user_id=current_user.id)
 
     if project is None:
@@ -270,7 +269,6 @@ async def project_processing_status(
     }
 
 
-# Project folders
 @router.post("/{project_id}/folders")
 async def create_project_folder(
     project_id: UUID,
@@ -303,7 +301,6 @@ async def list_project_folders(
     return [{"id": str(f.id), "name": f.name, "parent_id": str(f.parent_id) if f.parent_id else None} for f in folders]
 
 
-# Project workflows
 @router.get("/{project_id}/workflows")
 async def list_project_workflows(
     project_id: UUID,
@@ -318,7 +315,6 @@ async def list_project_workflows(
     return [{"id": str(w.id), "name": w.name} for w in workflows]
 
 
-# Project history
 @router.get("/{project_id}/history")
 async def list_project_history(
     project_id: UUID,

@@ -58,10 +58,8 @@ async def delete_workflow(db: AsyncSession, workflow: Workflow) -> None:
 
 
 async def run_workflow(db: AsyncSession, workflow: Workflow, media_id: UUID) -> dict:
-    # Create a job ID for tracking
     job_id = str(uuid.uuid4())
 
-    # Enqueue the workflow execution task
     pool = await create_worker_pool()
     try:
         arq_job = await pool.enqueue_job(

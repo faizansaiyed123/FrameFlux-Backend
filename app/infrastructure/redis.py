@@ -1,4 +1,3 @@
-# app/infrastructure/redis.py
 
 from collections.abc import AsyncGenerator
 import redis.asyncio as aioredis

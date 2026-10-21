@@ -760,8 +760,6 @@ async def merge_media_endpoint(
     media = await get_media_or_404(media_id, db, user_id=current_user.id)
     await verify_media_references_ownership(data.media_ids, current_user.id, db)
 
-    # Resolve public media IDs/stored filenames to actual stored filenames
-    # before handing references to the worker.
     input_filenames: list[str] = []
     for ref in data.media_ids:
         try:
@@ -972,9 +970,6 @@ async def reorder_clips_endpoint(
 ):
     media = await get_media_or_404(media_id, db, user_id=current_user.id)
 
-    # The public API accepts media IDs or stored filenames, while the worker
-    # operates on files in storage. Resolve every reference to its stored filename
-    # before enqueueing the merge task, preserving the requested order.
     resolved_filenames: list[str] = []
     for ref in data.media_ids:
         query = select(Media)
@@ -1227,17 +1222,14 @@ async def create_media_version(
     if not stored_filename or file_size is None:
         raise HTTPException(status_code=400, detail="stored_filename and file_size are required")
     
-    # Get the next version number
     result = await db.execute(
         select(MediaVersion).where(MediaVersion.media_id == media_id).order_by(MediaVersion.version_number.desc())
     )
     last_version = result.scalars().first()
     version_number = (last_version.version_number + 1) if last_version else 1
     
-    # Get file info
     file_path = Path(settings.processed_dir) / stored_filename
     if not file_path.exists():
-        # Try uploads dir
         file_path = Path(settings.upload_dir) / stored_filename
     
     if file_path.exists():

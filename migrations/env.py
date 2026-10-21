@@ -15,7 +15,6 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Import all models so Alembic registers every table with SQLAlchemy metadata.
 _ = (User, Media, MediaVersion, ProcessingJob, Project)
 
 target_metadata = Base.metadata

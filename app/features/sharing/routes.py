@@ -155,7 +155,6 @@ async def embed_player(token: str, request: Request, db: AsyncSession = Depends(
 @router.get("/stream/{token}")
 async def stream_shared_media(token: str, request: Request, db: AsyncSession = Depends(get_db)):
     share, media = await _get_shared_media(token, request, db)
-    # Respect download permissions for shared media.
     if not share.allow_download:
         disposition = "inline"
     else:

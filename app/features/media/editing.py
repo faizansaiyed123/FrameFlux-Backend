@@ -307,7 +307,6 @@ def transform_media(
             speed,
         )
     elif operation == "remove_audio":
-        # Remove the audio stream while preserving the video.
         pass
     else:
         raise ValueError(f"Unsupported transform: {operation}")

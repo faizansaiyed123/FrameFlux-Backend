@@ -18,7 +18,6 @@ async def get_dashboard_overview(
     user_id: UUID,
     recent_limit: int = 5,
 ) -> DashboardOverviewResponse:
-    # 1. Total projects
     projects_count_stmt = (
         select(func.count())
         .select_from(Project)
@@ -26,7 +25,6 @@ async def get_dashboard_overview(
     )
     total_projects = (await db.scalar(projects_count_stmt)) or 0
 
-    # 2. Total media & total storage
     media_stats_stmt = (
         select(
             func.count(Media.id),
@@ -38,7 +36,6 @@ async def get_dashboard_overview(
     total_media = media_stats[0] or 0
     total_storage_used_bytes = int(media_stats[1] or 0)
 
-    # 3. Media by type
     media_type_stmt = (
         select(Media.media_type, func.count(Media.id))
         .where(Media.user_id == user_id)
@@ -50,7 +47,6 @@ async def get_dashboard_overview(
         if m_type:
             media_by_type[m_type] = count
 
-    # 4. Storage by type
     storage_by_type_stmt = (
         select(Media.media_type, func.coalesce(func.sum(Media.file_size), 0))
         .where(Media.user_id == user_id)
@@ -62,7 +58,6 @@ async def get_dashboard_overview(
         if m_type:
             storage_by_type[m_type] = int(size)
 
-    # 5. Processing status counts
     status_stmt = (
         select(Media.processing_status, func.count(Media.id))
         .where(Media.user_id == user_id)
@@ -80,14 +75,12 @@ async def get_dashboard_overview(
         if p_status:
             processing_status_counts[p_status] = count
 
-    # 6. Active jobs count: media in pending, queued, or processing status
     active_jobs_count = (
         processing_status_counts.get("pending", 0)
         + processing_status_counts.get("queued", 0)
         + processing_status_counts.get("processing", 0)
     )
 
-    # 7. Recent projects with media counts
     recent_projects_stmt = (
         select(
             Project,
@@ -113,7 +106,6 @@ async def get_dashboard_overview(
         for proj, m_count in recent_projects_res
     ]
 
-    # 8. Recent media
     recent_media_stmt = (
         select(Media)
         .where(Media.user_id == user_id)

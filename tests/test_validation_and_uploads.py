@@ -20,9 +20,6 @@ from app.core.config import get_settings
 client = TestClient(app)
 
 
-# ---------------------------------------------------------
-# UNIT TESTS: VALIDATION LOGIC
-# ---------------------------------------------------------
 
 def test_validate_filename_and_extension_success() -> None:
     assert validate_filename_and_extension("video.mp4") == ".mp4"
@@ -52,20 +49,17 @@ def test_validate_mime_type_success() -> None:
     assert validate_mime_type("video/mp4", ".mp4") == "video/mp4"
     assert validate_mime_type("image/png", ".png") == "image/png"
     assert validate_mime_type("audio/mpeg; charset=utf-8", ".mp3") == "audio/mpeg"
-    # Fallback to extension inferred mime for octet-stream
     assert validate_mime_type("application/octet-stream", ".mp4") == "video/mp4"
     assert validate_mime_type(None, ".mp4") == "video/mp4"
 
 
 def test_validate_mime_type_disallowed_and_mismatched() -> None:
-    # Disallowed dangerous types
     with pytest.raises(ValueError, match="Disallowed or dangerous MIME type"):
         validate_mime_type("application/x-executable", ".mp4")
 
     with pytest.raises(ValueError, match="Disallowed or dangerous MIME type"):
         validate_mime_type("text/html", ".mp4")
 
-    # Mismatched media category
     with pytest.raises(ValueError, match="invalid for video extension"):
         validate_mime_type("image/png", ".mp4")
 
@@ -74,7 +68,6 @@ def test_validate_mime_type_disallowed_and_mismatched() -> None:
 
 
 def test_validate_file_content_signatures() -> None:
-    # Dangerous executable headers
     with pytest.raises(ValueError, match="PE/MZ"):
         validate_file_content(b"MZ\x90\x00\x03\x00\x00\x00", ".mp4")
 
@@ -87,7 +80,6 @@ def test_validate_file_content_signatures() -> None:
     with pytest.raises(ValueError, match="Script or HTML"):
         validate_file_content(b"<!DOCTYPE html><html>", ".mp4")
 
-    # Safe media chunks pass without exception
     validate_file_content(b"\x00\x00\x00 ftypisom\x00\x00\x02\x00", ".mp4")
     validate_file_content(b"\x89PNG\r\n\x1a\n", ".png")
 
@@ -99,19 +91,14 @@ def test_validate_file_size() -> None:
     with pytest.raises(ValueError, match="must be greater than 0"):
         validate_file_size(-5, 1000)
 
-    # Within limit -> ok
     validate_file_size(500, 1000)
 
-    # Exceeds limit -> 413
     from fastapi import HTTPException
     with pytest.raises(HTTPException) as exc_info:
         validate_file_size(1500, 1000)
     assert exc_info.value.status_code == 413
 
 
-# ---------------------------------------------------------
-# ENDPOINT TESTS: NORMAL UPLOAD (/media/upload)
-# ---------------------------------------------------------
 
 def test_upload_valid_media() -> None:
     now = datetime.now(timezone.utc)
@@ -211,7 +198,6 @@ def test_upload_executable_signature_returns_400() -> None:
 
     app.dependency_overrides[get_db] = override_db
     try:
-        # Renamed EXE as .mp4 with MZ header
         file_content = b"MZ\x90\x00\x03\x00\x00\x00dummy"
         response = client.post(
             "/media/upload",
@@ -249,7 +235,6 @@ def test_upload_file_exceeding_size_limit_returns_413() -> None:
     settings = get_settings()
     original_limit = settings.max_upload_size_bytes
     try:
-        # Temporarily lower max_upload_size_bytes for test
         settings.max_upload_size_bytes = 100
         file_content = b"\x00\x00\x00\x18ftypmp42" + b"X" * 150
         response = client.post(
@@ -263,9 +248,6 @@ def test_upload_file_exceeding_size_limit_returns_413() -> None:
         app.dependency_overrides.pop(get_db, None)
 
 
-# ---------------------------------------------------------
-# ENDPOINT TESTS: RESUMABLE UPLOADS
-# ---------------------------------------------------------
 
 def test_resumable_init_success() -> None:
     mock_upload_id = uuid4()
