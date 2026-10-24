@@ -163,13 +163,17 @@ class ResumableUploadService:
         meta = await ResumableUploadService._load_meta(upload_id, user_id=user_id)
         redis = await create_pool(WorkerSettings.redis_settings)
         await redis.hset(_redis_key(upload_id), mapping={"status": "paused"})
+        total_size = int(meta.get("total_size", "0"))
+        chunk_size = int(meta.get("chunk_size", "1"))
+        uploaded_chunks = len([i for i in meta.get("uploaded_chunks", "").split(",") if i])
+        total_chunks = max((total_size + chunk_size - 1) // chunk_size, 1)
         await set_upload_progress(
             str(upload_id),
             user_id,
             meta["original_filename"],
             status="paused",
-            progress=int(meta.get("uploaded_chunks", "0")) / max(int(meta.get("total_chunks", "1")), 1) * 100,
-            total_size=int(meta.get("total_size", "0")),
+            progress=int(uploaded_chunks / total_chunks * 100),
+            total_size=total_size,
         )
         await redis.close()
 
@@ -178,13 +182,17 @@ class ResumableUploadService:
         meta = await ResumableUploadService._load_meta(upload_id, user_id=user_id)
         redis = await create_pool(WorkerSettings.redis_settings)
         await redis.hset(_redis_key(upload_id), mapping={"status": "in_progress"})
+        total_size = int(meta.get("total_size", "0"))
+        chunk_size = int(meta.get("chunk_size", "1"))
+        uploaded_chunks = len([i for i in meta.get("uploaded_chunks", "").split(",") if i])
+        total_chunks = max((total_size + chunk_size - 1) // chunk_size, 1)
         await set_upload_progress(
             str(upload_id),
             user_id,
             meta["original_filename"],
             status="uploading",
-            progress=int(meta.get("uploaded_chunks", "0")) / max(int(meta.get("total_chunks", "1")), 1) * 100,
-            total_size=int(meta.get("total_size", "0")),
+            progress=int(uploaded_chunks / total_chunks * 100),
+            total_size=total_size,
         )
         await redis.close()
 
