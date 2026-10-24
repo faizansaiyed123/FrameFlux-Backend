@@ -9,6 +9,7 @@ from arq import create_pool
 from arq.connections import RedisSettings
 
 from app.core.config import get_settings
+from app.features.media.upload_progress import set_upload_progress, delete_upload_progress
 from app.features.media.models import Media
 from app.features.media.service import get_media_type
 from app.infrastructure.worker import WorkerSettings
@@ -134,6 +135,14 @@ class ResumableUploadService:
         await ResumableUploadService._load_meta(upload_id, user_id=user_id)
         redis = await create_pool(WorkerSettings.redis_settings)
         await redis.hset(_redis_key(upload_id), mapping={"status": "paused"})
+        await set_upload_progress(
+            str(upload_id),
+            user_id,
+            meta["original_filename"],
+            status="paused",
+            progress=int(meta.get("uploaded_chunks", "0")) / max(int(meta.get("total_chunks", "1")), 1) * 100,
+            total_size=int(meta.get("total_size", "0")),
+        )
         await redis.close()
 
     @staticmethod
@@ -141,6 +150,14 @@ class ResumableUploadService:
         await ResumableUploadService._load_meta(upload_id, user_id=user_id)
         redis = await create_pool(WorkerSettings.redis_settings)
         await redis.hset(_redis_key(upload_id), mapping={"status": "in_progress"})
+        await set_upload_progress(
+            str(upload_id),
+            user_id,
+            meta["original_filename"],
+            status="uploading",
+            progress=int(meta.get("uploaded_chunks", "0")) / max(int(meta.get("total_chunks", "1")), 1) * 100,
+            total_size=int(meta.get("total_size", "0")),
+        )
         await redis.close()
 
     @staticmethod
@@ -151,6 +168,7 @@ class ResumableUploadService:
             shutil.rmtree(temp_dir)
         redis = await create_pool(WorkerSettings.redis_settings)
         await redis.delete(_redis_key(upload_id))
+        await delete_upload_progress(str(upload_id))
         await redis.close()
 
 
