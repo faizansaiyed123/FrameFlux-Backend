@@ -20,6 +20,7 @@ from app.features.preview.routes import router as preview_router
 from app.features.projects.routes import router as projects_router
 from app.features.audio.routes import router as audio_router
 from app.features.thumbnails.routes import router as thumbnails_router
+from app.features.effects.routes import router as effects_router
 from app.features.subtitles.routes import router as subtitles_router
 from app.features.dashboard.routes import router as dashboard_router
 from app.features.favorites.routes import router as favorites_router
@@ -183,6 +184,7 @@ app.include_router(preview_router)
 app.include_router(projects_router)
 app.include_router(audio_router)
 app.include_router(thumbnails_router)
+app.include_router(effects_router)
 app.include_router(subtitles_router)
 app.include_router(dashboard_router)
 app.include_router(favorites_router)
