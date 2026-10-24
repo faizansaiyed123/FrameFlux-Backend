@@ -69,8 +69,18 @@ def generate_thumbnails_interval(input_path: str, output_dir: str, interval: flo
 def crop_thumbnail(input_path: str, output_path: str, x: int, y: int, width: int, height: int) -> None:
     if not Path(input_path).exists():
         raise FileNotFoundError(f"Thumbnail file not found: {input_path}")
+    if width <= 0 or height <= 0 or x < 0 or y < 0:
+        raise ValueError("Crop coordinates and dimensions must be positive")
+
+    input_stream = ffmpeg.input(input_path)
     _run(
-        ffmpeg.input(input_path)
-        .output(output_path, vf=f"crop={width}:{height}:{x}:{y}", vframes=1)
+        input_stream
+        .output(
+            output_path,
+            vf=f"crop={width}:{height}:{x}:{y}",
+            vframes=1,
+            format="mjpeg",
+            **{"q:v": 2},
+        )
         .overwrite_output()
     )
