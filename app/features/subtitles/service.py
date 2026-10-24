@@ -93,27 +93,40 @@ def mux_soft_subtitles(
         disposition.append("forced")
     disposition_str = "+".join(disposition) if disposition else "0"
 
-    video_input = ffmpeg.input(input_path)
-    subtitle_input = ffmpeg.input(subtitle_path)
-    (
-        ffmpeg
-        .output(
-            video_input.video,
-            video_input.audio,
-            subtitle_input['s'],
-            str(output_path),
-            vcodec="copy",
-            acodec="copy",
-            scodec="mov_text",
-            **{
-                "metadata:s:s:0": f"language={language}",
-                "disposition:s:s:0": disposition_str,
-            },
-        )
-        .overwrite_output()
-        .run()
-    )
+    subtitle_suffix = Path(subtitle_path).suffix.lower()
+    subtitle_format = {
+        ".srt": "srt",
+        ".vtt": "webvtt",
+        ".ass": "ass",
+        ".sub": "sub",
+    }.get(subtitle_suffix)
 
+    video_input = ffmpeg.input(input_path)
+    subtitle_kwargs = {"f": subtitle_format} if subtitle_format else {}
+    subtitle_input = ffmpeg.input(subtitle_path, **subtitle_kwargs)
+
+    try:
+        (
+            ffmpeg
+            .output(
+                video_input.video,
+                video_input.audio,
+                subtitle_input["s"],
+                str(output_path),
+                vcodec="copy",
+                acodec="copy",
+                scodec="mov_text",
+                **{
+                    "metadata:s:s:0": f"language={language}",
+                    "disposition:s:s:0": disposition_str,
+                },
+            )
+            .overwrite_output()
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+    except ffmpeg.Error as exc:
+        error = exc.stderr.decode(errors="replace") if exc.stderr else "FFmpeg subtitle mux failed"
+        raise RuntimeError(error) from exc
 
 def shift_subtitle_timestamps(
     subtitle_path: str,
