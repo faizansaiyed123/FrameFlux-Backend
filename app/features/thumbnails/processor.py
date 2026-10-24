@@ -71,6 +71,6 @@ def crop_thumbnail(input_path: str, output_path: str, x: int, y: int, width: int
         raise FileNotFoundError(f"Thumbnail file not found: {input_path}")
     _run(
         ffmpeg.input(input_path)
-        .output(output_path, vf=f"crop={width}:{height}:{x}:{y}")
+        .output(output_path, vf=f"crop={width}:{height}:{x}:{y}", vframes=1)
         .overwrite_output()
     )
