@@ -111,7 +111,7 @@ def mux_soft_subtitles(
             .output(
                 video_input.video,
                 video_input.audio,
-                subtitle_input["s"],
+                subtitle_input[0],
                 str(output_path),
                 vcodec="copy",
                 acodec="copy",
