@@ -39,6 +39,7 @@ from app.features.ui.routes import router as ui_router
 from app.features.images.routes import router as images_router
 from app.features.export.routes import router as export_router
 from app.features.metadata.routes import router as metadata_router
+from app.features.transcoding.routes import router as transcoding_router
 
 settings = get_settings()
 configure_logging(level="DEBUG" if settings.debug else "INFO")
@@ -203,3 +204,4 @@ app.include_router(ui_router)
 app.include_router(images_router)
 app.include_router(export_router)
 app.include_router(metadata_router)
+app.include_router(transcoding_router)
