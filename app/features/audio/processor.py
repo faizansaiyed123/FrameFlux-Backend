@@ -160,7 +160,7 @@ def trim_audio(input_path: str, output_path: str, start: float, end: float) -> N
         raise ValueError("End time must be greater than start time")
     _run(
         ffmpeg.input(input_path, ss=start, to=end)
-        .output(output_path, acodec="copy")
+        .output(output_path, acodec="libmp3lame")
         .overwrite_output()
     )
 
