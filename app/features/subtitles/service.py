@@ -1,5 +1,6 @@
 import ffmpeg
 from pathlib import Path
+import subprocess
 from typing import Any
 
 
@@ -86,47 +87,45 @@ def mux_soft_subtitles(
     if not Path(subtitle_path).exists():
         raise FileNotFoundError(f"Subtitle file not found: {subtitle_path}")
 
-    disposition = []
-    if is_default:
-        disposition.append("default")
-    if is_forced:
-        disposition.append("forced")
-    disposition_str = "+".join(disposition) if disposition else "0"
+    disposition = "0"
+    if is_default and is_forced:
+        disposition = "default+forced"
+    elif is_default:
+        disposition = "default"
+    elif is_forced:
+        disposition = "forced"
 
-    subtitle_suffix = Path(subtitle_path).suffix.lower()
-    subtitle_format = {
-        ".srt": "srt",
-        ".vtt": "webvtt",
-        ".ass": "ass",
-        ".sub": "sub",
-    }.get(subtitle_suffix)
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        input_path,
+        "-i",
+        subtitle_path,
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a:0?",
+        "-map",
+        "1:0",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "copy",
+        "-c:s",
+        "mov_text",
+        "-metadata:s:s:0",
+        f"language={language}",
+        "-disposition:s:0",
+        disposition,
+        "-movflags",
+        "+faststart",
+        output_path,
+    ]
 
-    video_input = ffmpeg.input(input_path)
-    subtitle_kwargs = {"f": subtitle_format} if subtitle_format else {}
-    subtitle_input = ffmpeg.input(subtitle_path, **subtitle_kwargs)
-
-    try:
-        (
-            ffmpeg
-            .output(
-                video_input.video,
-                video_input.audio,
-                subtitle_input[0],
-                str(output_path),
-                vcodec="copy",
-                acodec="copy",
-                scodec="mov_text",
-                **{
-                    "metadata:s:s:0": f"language={language}",
-                    "disposition:s:s:0": disposition_str,
-                },
-            )
-            .overwrite_output()
-            .run(capture_stdout=True, capture_stderr=True)
-        )
-    except ffmpeg.Error as exc:
-        error = exc.stderr.decode(errors="replace") if exc.stderr else "FFmpeg subtitle mux failed"
-        raise RuntimeError(error) from exc
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[-4000:] or "FFmpeg subtitle mux failed")
 
 def shift_subtitle_timestamps(
     subtitle_path: str,
