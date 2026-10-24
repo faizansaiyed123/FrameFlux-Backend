@@ -83,12 +83,22 @@ class ResumableUploadService:
                 "stored_filename": stored_filename,
                 "total_size": str(total_size),
                 "chunk_size": str(chunk_size),
-                "uploaded_chunks": "",  
+                "uploaded_chunks": "",
                 "status": "in_progress",
                 "user_id": str(user_id) if user_id else "",
             },
         )
         await redis.close()
+        if user_id is not None:
+            await set_upload_progress(
+                str(upload_id),
+                user_id,
+                original_filename,
+                status="uploading",
+                progress=0,
+                total_size=total_size,
+                uploaded_size=0,
+            )
         return upload_id
 
     @staticmethod
@@ -129,10 +139,28 @@ class ResumableUploadService:
         redis = await create_pool(WorkerSettings.redis_settings)
         await redis.hset(_redis_key(upload_id), mapping={"uploaded_chunks": new_value})
         await redis.close()
+        if user_id is not None:
+            total_size = int(meta["total_size"])
+            chunk_size = int(meta["chunk_size"])
+            total_chunks = max((total_size + chunk_size - 1) // chunk_size, 1)
+            uploaded_size = min(total_size, len(data) + sum(
+                _chunk_path(upload_id, i).stat().st_size
+                for i in indices
+                if i != index and _chunk_path(upload_id, i).exists()
+            ))
+            await set_upload_progress(
+                str(upload_id),
+                user_id,
+                meta["original_filename"],
+                status="uploading",
+                progress=int(len(indices) / total_chunks * 100),
+                total_size=total_size,
+                uploaded_size=uploaded_size,
+            )
 
     @staticmethod
     async def pause(upload_id: UUID, user_id: Optional[UUID] = None) -> None:
-        await ResumableUploadService._load_meta(upload_id, user_id=user_id)
+        meta = await ResumableUploadService._load_meta(upload_id, user_id=user_id)
         redis = await create_pool(WorkerSettings.redis_settings)
         await redis.hset(_redis_key(upload_id), mapping={"status": "paused"})
         await set_upload_progress(
@@ -147,7 +175,7 @@ class ResumableUploadService:
 
     @staticmethod
     async def resume(upload_id: UUID, user_id: Optional[UUID] = None) -> None:
-        await ResumableUploadService._load_meta(upload_id, user_id=user_id)
+        meta = await ResumableUploadService._load_meta(upload_id, user_id=user_id)
         redis = await create_pool(WorkerSettings.redis_settings)
         await redis.hset(_redis_key(upload_id), mapping={"status": "in_progress"})
         await set_upload_progress(
