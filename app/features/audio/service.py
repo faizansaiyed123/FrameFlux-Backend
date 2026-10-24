@@ -62,7 +62,10 @@ def adjust_volume(input_path: str, output_path: str, volume: float, fade_in: flo
     if fade_in:
         audio = audio.filter("afade", t="in", st=0, d=fade_in)
     if fade_out:
-        audio = audio.filter("afade", t="out", st=None, d=fade_out)
+        probe = ffmpeg.probe(input_path)
+        duration = float(probe.get("format", {}).get("duration", 0) or 0)
+        fade_start = max(duration - fade_out, 0)
+        audio = audio.filter("afade", t="out", st=fade_start, d=fade_out)
 
     output = ffmpeg.output(audio, stream.video, output_path, vcodec="libx264", acodec="aac", movflags="+faststart")
     _run(output)
