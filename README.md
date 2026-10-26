@@ -1,6 +1,6 @@
 # FrameFlux Backend API Documentation
 
-FrameFlux is a high-performance media processing and editing backend built with FastAPI, PostgreSQL, Redis, ARQ background task queues, and FFmpeg.
+FrameFlux is an asynchronous media-processing and editing backend built with FastAPI, PostgreSQL, Redis, ARQ background task queues, and FFmpeg.
 
 ---
 
