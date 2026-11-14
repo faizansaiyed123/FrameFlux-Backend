@@ -292,17 +292,19 @@ async def upload_multiple_media(
             await enforce_demo_upload_quota(
                 db,
                 current_user.id,
-                sum(int(size or 0) for size in known_sizes),
+                max(int(size or 0) for size in known_sizes),
                 incoming_files=len(files),
                 is_demo_user=getattr(current_user, "is_demo_session", False),
+                total_incoming_bytes=sum(int(size or 0) for size in known_sizes),
             )
         media_list = await save_multiple_uploads(files)
         await enforce_demo_upload_quota(
             db,
             current_user.id,
-            sum(item.file_size for item in media_list),
+            max(item.file_size for item in media_list),
             incoming_files=len(media_list),
             is_demo_user=getattr(current_user, "is_demo_session", False),
+            total_incoming_bytes=sum(item.file_size for item in media_list),
         )
         for media in media_list:
             media.user_id = current_user.id
