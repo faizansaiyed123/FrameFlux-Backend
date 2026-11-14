@@ -14,7 +14,6 @@ from app.features.jobs.service import (
     get_processing_job,
 )
 from app.features.media.models import Media
-from app.features.demo.models import DemoSession
 from app.infrastructure.database import get_db
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
@@ -72,12 +71,10 @@ async def get_job_endpoint(
             m_uuid = UUID(media_id)
             res = await db.execute(select(Media).where(Media.id == m_uuid))
             media = res.scalar_one_or_none()
-            demo_owner = await db.scalar(
-                select(DemoSession.id).where(DemoSession.user_id == current_user.id)
-            )
+            is_demo_user = getattr(current_user, "is_demo_session", False)
             if media and (
-                (demo_owner is not None and media.user_id != current_user.id)
-                or (demo_owner is None and media.user_id is not None and media.user_id != current_user.id)
+                (is_demo_user and media.user_id != current_user.id)
+                or (not is_demo_user and media.user_id is not None and media.user_id != current_user.id)
             ):
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
