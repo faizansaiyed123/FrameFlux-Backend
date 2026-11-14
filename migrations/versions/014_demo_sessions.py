@@ -21,7 +21,7 @@ def upgrade() -> None:
     op.create_table(
         "demo_sessions",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, nullable=False),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("user_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("client_ip_hash", sa.String(length=64), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
@@ -29,7 +29,7 @@ def upgrade() -> None:
         sa.Column("cleanup_state", sa.String(length=24), server_default="active", nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("cleaned_at", sa.DateTime(timezone=True), nullable=True),
-        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="SET NULL"),
         sa.UniqueConstraint("user_id", name="uq_demo_sessions_user_id"),
     )
     op.create_index("ix_demo_sessions_user_id", "demo_sessions", ["user_id"], unique=True)
