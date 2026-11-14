@@ -224,3 +224,206 @@ async def enforce_demo_job_quota(db: AsyncSession, user_id: UUID) -> None:
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="The demo workspace allows one active processing job at a time.",
         )
+
+
+async def end_demo_session(db: AsyncSession, user_id: UUID) -> str:
+    demo_session = await get_active_demo_session(db, user_id)
+    if demo_session is None:
+        # An expired or already-ended session is not an active browser session.
+        return "already-ended"
+    now = datetime.now(timezone.utc)
+    demo_session.revoked_at = now
+    demo_session.cleanup_state = "pending"
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is not None:
+        user.is_active = False
+    await db.commit()
+    await cleanup_expired_demo_sessions(db, session_ids=[demo_session.id])
+    return "cleanup-requested"
+
+
+async def _delete_owned_redis_state(user_id: UUID, media_ids: list[UUID], job_ids: list[str]) -> bool:
+    from app.infrastructure.redis import get_redis_client
+
+    redis = get_redis_client()
+    try:
+        # Resumable-upload keys contain an owner field. Never delete by prefix alone.
+        async for key in redis.scan_iter(match="resumable_upload:*", count=200):
+            metadata = await redis.hgetall(key)
+            if metadata.get("user_id") == str(user_id):
+                upload_id = key.rsplit(":", 1)[-1]
+                temp_dir = Path(settings.upload_dir) / "resumable" / upload_id
+                if temp_dir.exists():
+                    shutil.rmtree(temp_dir)
+                await redis.delete(key)
+
+        # Upload-progress hashes are similarly scoped by their stored owner.
+        async for key in redis.scan_iter(match="upload:progress:*", count=200):
+            metadata = await redis.hgetall(key)
+            if metadata.get("user_id") == str(user_id):
+                await redis.delete(key)
+
+        for media_id in media_ids:
+            await redis.delete(
+                f"media:progress:{media_id}",
+                f"media:last_job:{media_id}",
+            )
+        for job_id in job_ids:
+            await redis.delete(f"job:progress:{job_id}")
+        return True
+    except Exception:
+        return False
+    finally:
+        await redis.aclose()
+
+
+def _safe_remove_upload_file(filename: str | None) -> bool:
+    if not filename:
+        return True
+    root = Path(settings.upload_dir).resolve()
+    candidate = (root / filename).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return False
+    try:
+        candidate.unlink(missing_ok=True)
+        return True
+    except OSError:
+        return False
+
+
+async def cleanup_expired_demo_sessions(
+    db: AsyncSession,
+    session_ids: list[UUID] | None = None,
+    batch_size: int = 25,
+) -> dict[str, int]:
+    """Revoke and remove only expired demo-owned data; defer while media jobs run."""
+    from sqlalchemy import delete, or_
+
+    from app.features.comparisons.models import MediaComparison
+    from app.features.favorites.models import Favorite
+    from app.features.history.models import ProcessingHistory
+    from app.features.notifications.models import Notification
+    from app.features.presets.models import Preset
+    from app.features.projects.folder_models import ProjectFolder
+    from app.features.sharing.models import ShareLink
+    from app.features.ui.models import UserPreference
+    from app.features.video.models import VideoAdjustment
+    from app.features.workflows.models import Workflow
+
+    now = datetime.now(timezone.utc)
+    query = select(DemoSession).where(
+        DemoSession.cleaned_at.is_(None),
+        or_(
+            DemoSession.expires_at <= now,
+            DemoSession.revoked_at.is_not(None),
+        ),
+    )
+    if session_ids:
+        query = query.where(DemoSession.id.in_(session_ids))
+    query = query.order_by(DemoSession.expires_at).limit(batch_size).with_for_update(skip_locked=True)
+    result = await db.execute(query)
+    sessions = list(result.scalars().all())
+
+    cleaned = 0
+    waiting = 0
+    failed = 0
+
+    for demo_session in sessions:
+        demo_session.revoked_at = demo_session.revoked_at or now
+        demo_session.cleanup_state = "waiting_for_jobs"
+        user_result = await db.execute(select(User).where(User.id == demo_session.user_id))
+        user = user_result.scalar_one_or_none()
+        if user is None:
+            demo_session.cleaned_at = now
+            demo_session.cleanup_state = "cleaned"
+            await db.commit()
+            cleaned += 1
+            continue
+
+        user.is_active = False
+        media_result = await db.execute(select(Media).where(Media.user_id == user.id))
+        media_rows = list(media_result.scalars().all())
+        media_ids = [item.id for item in media_rows]
+
+        # Queued/running media is allowed to finish before its files are removed.
+        active_media = await db.scalar(
+            select(func.count(Media.id)).where(
+                Media.user_id == user.id,
+                Media.processing_status.in_(["queued", "processing"]),
+            )
+        )
+        active_jobs = await db.scalar(
+            select(func.count(ProcessingJob.id)).where(
+                ProcessingJob.user_id == user.id,
+                ProcessingJob.status.in_(["queued", "running", "retrying"]),
+            )
+        )
+        if int(active_media or 0) + int(active_jobs or 0) > 0:
+            demo_session.cleanup_state = "waiting_for_jobs"
+            await db.commit()
+            waiting += 1
+            continue
+
+        job_result = await db.execute(
+            select(ProcessingJob.arq_job_id).where(
+                ProcessingJob.user_id == user.id,
+                ProcessingJob.arq_job_id.is_not(None),
+            )
+        )
+        job_ids = [value for value in job_result.scalars().all() if value]
+        version_result = await db.execute(
+            select(MediaVersion).where(MediaVersion.media_id.in_(media_ids))
+        ) if media_ids else None
+        versions = list(version_result.scalars().all()) if version_result is not None else []
+        project_result = await db.execute(select(Project.id).where(Project.user_id == user.id))
+        project_ids = list(project_result.scalars().all())
+
+        if not await _delete_owned_redis_state(user.id, media_ids, job_ids):
+            demo_session.cleanup_state = "waiting_for_redis"
+            await db.commit()
+            failed += 1
+            continue
+
+        files_ok = True
+        for media in media_rows:
+            files_ok = _safe_remove_upload_file(media.stored_filename) and files_ok
+            files_ok = _safe_remove_upload_file(media.processed_filename) and files_ok
+        for version in versions:
+            files_ok = _safe_remove_upload_file(version.stored_filename) and files_ok
+        if not files_ok:
+            demo_session.cleanup_state = "waiting_for_files"
+            await db.commit()
+            failed += 1
+            continue
+
+        # These legacy tables use soft UUID references rather than cascading FKs.
+        if media_ids:
+            await db.execute(
+                delete(MediaComparison).where(
+                    or_(
+                        MediaComparison.media_a_id.in_(media_ids),
+                        MediaComparison.media_b_id.in_(media_ids),
+                    )
+                )
+            )
+            await db.execute(delete(VideoAdjustment).where(VideoAdjustment.media_id.in_(media_ids)))
+        if project_ids:
+            await db.execute(delete(ProjectFolder).where(ProjectFolder.project_id.in_(project_ids)))
+        await db.execute(delete(ProcessingHistory).where(ProcessingHistory.user_id == user.id))
+        await db.execute(delete(Notification).where(Notification.user_id == user.id))
+        await db.execute(delete(ShareLink).where(ShareLink.user_id == user.id))
+        await db.execute(delete(Workflow).where(Workflow.user_id == user.id))
+        await db.execute(delete(UserPreference).where(UserPreference.user_id == user.id))
+        await db.execute(delete(Preset).where(Preset.user_id == user.id))
+        await db.execute(delete(Favorite).where(Favorite.user_id == user.id))
+
+        demo_session.cleanup_state = "cleaned"
+        demo_session.cleaned_at = now
+        await db.delete(user)
+        await db.commit()
+        cleaned += 1
+
+    return {"cleaned": cleaned, "waiting_for_jobs": waiting, "failed_cleanup": failed}
