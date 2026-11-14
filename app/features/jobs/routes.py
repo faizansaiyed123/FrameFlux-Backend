@@ -66,12 +66,21 @@ async def get_job_endpoint(
             detail=f"Job '{job_id}' not found",
         )
     media_id = job_data.get("media_id")
+    is_demo_user = getattr(current_user, "is_demo_session", False)
+    if is_demo_user and not media_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job '{job_id}' not found",
+        )
     if media_id:
         try:
             m_uuid = UUID(media_id)
             res = await db.execute(select(Media).where(Media.id == m_uuid))
             media = res.scalar_one_or_none()
-            if media and media.user_id is not None and media.user_id != current_user.id:
+            if media and (
+                (is_demo_user and media.user_id != current_user.id)
+                or (not is_demo_user and media.user_id is not None and media.user_id != current_user.id)
+            ):
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Job '{job_id}' not found",
