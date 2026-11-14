@@ -270,12 +270,16 @@ async def _delete_owned_redis_state(user_id: UUID, media_ids: list[UUID], job_id
             if metadata.get("user_id") == str(user_id):
                 await redis.delete(key)
 
+        discovered_job_ids = set(job_ids)
         for media_id in media_ids:
+            last_job_id = await redis.get(f"media:last_job:{media_id}")
+            if last_job_id:
+                discovered_job_ids.add(str(last_job_id))
             await redis.delete(
                 f"media:progress:{media_id}",
                 f"media:last_job:{media_id}",
             )
-        for job_id in job_ids:
+        for job_id in discovered_job_ids:
             await redis.delete(f"job:progress:{job_id}")
         return True
     except Exception:
