@@ -181,10 +181,16 @@ async def enforce_demo_upload_quota(
     user_id: UUID,
     incoming_bytes: int,
     incoming_files: int = 1,
+    is_demo_user: bool = False,
 ) -> None:
+    if not is_demo_user:
+        return
     demo_session = await get_active_demo_session(db, user_id)
     if demo_session is None:
-        return
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Demo session is no longer active.",
+        )
     if incoming_bytes < 0 or incoming_bytes > settings.demo_max_upload_size_bytes:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
