@@ -16,10 +16,10 @@ class DemoSession(Base):
         primary_key=True,
         default=uuid.uuid4,
     )
-    user_id: Mapped[uuid.UUID] = mapped_column(
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
         unique=True,
         index=True,
     )
