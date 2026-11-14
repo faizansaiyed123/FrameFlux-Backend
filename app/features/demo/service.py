@@ -16,7 +16,7 @@ from app.core.security import create_access_token, hash_password
 from app.features.auth.models import User
 from app.features.demo.models import DemoSession
 from app.features.jobs.models import ProcessingJob
-from app.features.media.models import Media
+from app.features.media.models import Media, MediaVersion
 from app.features.projects.models import Project
 
 settings = get_settings()
