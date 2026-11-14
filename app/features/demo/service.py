@@ -182,6 +182,7 @@ async def enforce_demo_upload_quota(
     incoming_bytes: int,
     incoming_files: int = 1,
     is_demo_user: bool = False,
+    total_incoming_bytes: int | None = None,
 ) -> None:
     if not is_demo_user:
         return
@@ -203,7 +204,8 @@ async def enforce_demo_upload_quota(
             )
         )
     ).one()
-    if count + incoming_files > settings.demo_max_media_files or total_bytes + incoming_bytes > settings.demo_max_storage_bytes:
+    bytes_to_add = total_incoming_bytes if total_incoming_bytes is not None else incoming_bytes
+    if count + incoming_files > settings.demo_max_media_files or total_bytes + bytes_to_add > settings.demo_max_storage_bytes:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="This demo workspace has reached its media limit. End the demo to reset the workspace.",
