@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.features.auth.dependencies import get_current_active_user
 from app.features.auth.models import User
-from app.features.demo.models import DemoSession
 from app.features.demo.service import enforce_demo_upload_quota, enforce_demo_job_quota
 from app.features.media.models import Media, MediaVersion
 from app.features.media.schemas import (
@@ -144,7 +143,6 @@ async def enqueue_media_job(
     demo_user_id: UUID | None = None,
 ):
     media_id = None
-    demo_user_id = None
     if args:
         try:
             media_id = UUID(str(args[0]))
@@ -449,7 +447,7 @@ async def resumable_retry(
             detail="Demo upload chunks are limited to 2 MB.",
         )
     content = await file.read()
-    if demo_owner is not None and len(content) > get_settings().demo_max_chunk_size_bytes:
+    if is_demo_user and len(content) > get_settings().demo_max_chunk_size_bytes:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail="Demo upload chunks are limited to 2 MB.",
@@ -500,9 +498,6 @@ async def list_media(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    demo_owner = await db.scalar(
-        select(DemoSession.id).where(DemoSession.user_id == current_user.id)
-    )
     if getattr(current_user, "is_demo_session", False):
         query = select(Media).where(Media.user_id == current_user.id)
     else:
@@ -582,12 +577,10 @@ async def get_media_job_endpoint(
             m_uuid = UUID(media_id)
             res = await db.execute(select(Media).where(Media.id == m_uuid))
             media = res.scalar_one_or_none()
-            demo_owner = await db.scalar(
-                select(DemoSession.id).where(DemoSession.user_id == current_user.id)
-            )
+            is_demo_user = getattr(current_user, "is_demo_session", False)
             if media and (
-                (demo_owner is not None and media.user_id != current_user.id)
-                or (demo_owner is None and media.user_id is not None and media.user_id != current_user.id)
+                (is_demo_user and media.user_id != current_user.id)
+                or (not is_demo_user and media.user_id is not None and media.user_id != current_user.id)
             ):
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -624,7 +617,8 @@ async def process_media_endpoint(
         "process_media_task",
         str(media.id),
         media.stored_filename,
-     , demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None))
+        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
+    )
 
     return {
         "media_id": str(media.id),
@@ -667,7 +661,8 @@ async def convert_media_endpoint(
         media.stored_filename,
         output_filename,
         options,
-     , demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None))
+        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
+    )
     await mark_processing_pending(media, db)
     return {
         "media_id": str(media.id),
@@ -700,7 +695,8 @@ async def compress_media_endpoint(
         output_filename,
         options,
         target_size_mb,
-     , demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None))
+        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
+    )
     await mark_processing_pending(media, db)
     return {
         "media_id": str(media.id),
@@ -742,7 +738,8 @@ async def edit_media_endpoint(
         data.operation,
         data.start,
         data.end,
-     , demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None))
+        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
+    )
     await mark_processing_pending(media, db)
     return {
         "media_id": str(media.id),
@@ -897,7 +894,8 @@ async def merge_media_endpoint(
         str(media_id),
         input_filenames,
         output_filename,
-     , demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None))
+        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
+    )
     await mark_processing_pending(media, db)
     return {
         "media_id": str(media_id),
@@ -924,7 +922,8 @@ async def transform_media_endpoint(
         media.stored_filename,
         output_filename,
         options,
-     , demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None))
+        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
+    )
     await mark_processing_pending(media, db)
     return {
         "media_id": str(media_id),
@@ -951,7 +950,8 @@ async def freeze_frame_endpoint(
         output_filename,
         data.timestamp,
         data.duration,
-     , demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None))
+        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
+    )
     await mark_processing_pending(media, db)
     return {
         "media_id": str(media_id),
@@ -986,7 +986,8 @@ async def overlay_media_endpoint(
         media.stored_filename,
         output_filename,
         options,
-     , demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None))
+        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
+    )
     await mark_processing_pending(media, db)
     return {
         "media_id": str(media_id),
@@ -1012,7 +1013,8 @@ async def split_media_endpoint(
         media.stored_filename,
         output_prefix,
         data.split_points,
-     , demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None))
+        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
+    )
     await mark_processing_pending(media, db)
     return {
         "media_id": str(media_id),
@@ -1040,7 +1042,8 @@ async def keep_clips_endpoint(
         output_filename,
         "keep",
         clip_tuples,
-     , demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None))
+        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
+    )
     await mark_processing_pending(media, db)
     return {
         "media_id": str(media_id),
@@ -1068,7 +1071,8 @@ async def delete_clips_endpoint(
         output_filename,
         "delete",
         clip_tuples,
-     , demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None))
+        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
+    )
     await mark_processing_pending(media, db)
     return {
         "media_id": str(media_id),
@@ -1125,7 +1129,8 @@ async def reorder_clips_endpoint(
         str(media_id),
         resolved_filenames,
         output_filename,
-     , demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None))
+        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
+    )
     await mark_processing_pending(media, db)
     return {
         "media_id": str(media_id),
@@ -1164,7 +1169,8 @@ async def append_clips_endpoint(
         str(media_id),
         ordered_ids,
         output_filename,
-     , demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None))
+        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
+    )
     await mark_processing_pending(media, db)
     return {
         "media_id": str(media_id),
@@ -1198,7 +1204,8 @@ async def process_media_unified_endpoint(
         [op.model_dump() for op in data.operations],
         str(uuid4()),
         str(current_user.id),
-     , demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None))
+        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
+    )
 
     return {
         "media_id": str(media.id),
