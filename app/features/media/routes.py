@@ -1149,7 +1149,7 @@ async def append_clips_endpoint(
     db: AsyncSession = Depends(get_db),
 ):
     media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
-    await verify_media_references_ownership(data.media_ids, current_user.id, db)
+    await verify_media_references_ownership(data.media_ids, current_user.id, db, is_demo_user=getattr(current_user, "is_demo_session", False))
     ordered_ids = [media.stored_filename]
     for ref in data.media_ids:
         try:
