@@ -394,10 +394,24 @@ async def resumable_chunk(
     index: int,
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
 ):
     if index < 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chunk index must be non-negative")
+    demo_owner = await db.scalar(
+        select(DemoSession.id).where(DemoSession.user_id == current_user.id)
+    )
+    if demo_owner is not None and file.size is not None and file.size > get_settings().demo_max_chunk_size_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Demo upload chunks are limited to 2 MB.",
+        )
     content = await file.read()
+    if demo_owner is not None and len(content) > get_settings().demo_max_chunk_size_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Demo upload chunks are limited to 2 MB.",
+        )
     try:
         await ResumableUploadService.store_chunk(upload_id, index, content, user_id=current_user.id)
     except HTTPException:
@@ -434,10 +448,24 @@ async def resumable_retry(
     index: int,
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
 ) -> ChunkUploadResponse:
     if index < 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chunk index must be non-negative")
+    demo_owner = await db.scalar(
+        select(DemoSession.id).where(DemoSession.user_id == current_user.id)
+    )
+    if demo_owner is not None and file.size is not None and file.size > get_settings().demo_max_chunk_size_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Demo upload chunks are limited to 2 MB.",
+        )
     content = await file.read()
+    if demo_owner is not None and len(content) > get_settings().demo_max_chunk_size_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Demo upload chunks are limited to 2 MB.",
+        )
     try:
         await ResumableUploadService.store_chunk(upload_id, index, content, user_id=current_user.id)
     except HTTPException:
@@ -566,7 +594,13 @@ async def get_media_job_endpoint(
             m_uuid = UUID(media_id)
             res = await db.execute(select(Media).where(Media.id == m_uuid))
             media = res.scalar_one_or_none()
-            if media and media.user_id is not None and media.user_id != current_user.id:
+            demo_owner = await db.scalar(
+                select(DemoSession.id).where(DemoSession.user_id == current_user.id)
+            )
+            if media and (
+                (demo_owner is not None and media.user_id != current_user.id)
+                or (demo_owner is None and media.user_id is not None and media.user_id != current_user.id)
+            ):
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Job '{job_id}' not found",
