@@ -118,6 +118,7 @@ async def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
+    user.is_demo_session = demo_session is not None if demo_session_claim is not None else False
     return user
 
 
