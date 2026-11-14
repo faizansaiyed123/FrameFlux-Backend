@@ -204,16 +204,21 @@ async def enforce_demo_upload_quota(
         )
 
 
-async def enforce_demo_job_quota(db: AsyncSession, user_id: UUID) -> None:
+async def enforce_demo_job_quota(
+    db: AsyncSession,
+    user_id: UUID,
+    exclude_media_id: UUID | None = None,
+) -> None:
     demo_session = await get_active_demo_session(db, user_id)
     if demo_session is None:
         return
-    media_active = await db.scalar(
-        select(func.count(Media.id)).where(
-            Media.user_id == user_id,
-            Media.processing_status.in_([ "pending", "processing" ]),
-        )
+    media_query = select(func.count(Media.id)).where(
+        Media.user_id == user_id,
+        Media.processing_status.in_(["queued", "processing"]),
     )
+    if exclude_media_id is not None:
+        media_query = media_query.where(Media.id != exclude_media_id)
+    media_active = await db.scalar(media_query)
     jobs_active = await db.scalar(
         select(func.count(ProcessingJob.id)).where(
             ProcessingJob.user_id == user_id,
