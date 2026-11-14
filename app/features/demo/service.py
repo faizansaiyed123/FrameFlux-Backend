@@ -101,7 +101,12 @@ async def create_demo_workspace(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        _, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
+        try:
+            _, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            raise RuntimeError("Synthetic media generation exceeded its 30-second limit")
         if process.returncode != 0 or not source_path.is_file():
             message = stderr.decode("utf-8", errors="replace")[-1000:]
             raise RuntimeError(f"Could not create synthetic media fixture: {message}")
@@ -145,7 +150,6 @@ async def create_demo_workspace(
     except Exception:
         await db.rollback()
         source_path.unlink(missing_ok=True)
-        preview_path.unlink(missing_ok=True)
         raise
 
     token = create_access_token(
