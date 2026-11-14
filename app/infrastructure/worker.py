@@ -1,7 +1,10 @@
 from arq import create_pool
+from arq.cron import cron
 from arq.connections import RedisSettings
 
 from app.core.config import get_settings
+from app.features.demo.service import cleanup_expired_demo_sessions
+from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.tasks import (
     compress_media_task,
     process_media_task,
@@ -20,6 +23,11 @@ from app.infrastructure.tasks import (
 )
 
 settings = get_settings()
+
+
+async def cleanup_demo_sessions_task(ctx):
+    async with AsyncSessionLocal() as db:
+        return await cleanup_expired_demo_sessions(db, batch_size=25)
 
 
 async def on_startup(ctx):
@@ -61,6 +69,9 @@ class WorkerSettings:
     job_timeout = settings.get_worker_job_timeout()
     max_jobs = settings.get_worker_max_jobs()
     keep_result = 3600
+    cron_jobs = [
+        cron(cleanup_demo_sessions_task, minute=set(range(0, 60, 5))),
+    ]
 
 
 async def create_worker_pool():
