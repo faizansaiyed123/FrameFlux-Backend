@@ -77,9 +77,7 @@ async def create_demo_workspace(
     upload_root = Path(settings.upload_dir).resolve()
     upload_root.mkdir(parents=True, exist_ok=True)
     stored_filename = f"demo-{uuid4().hex}.mp4"
-    processed_filename = f"demo-{uuid4().hex}-preview.mp4"
     source_path = upload_root / stored_filename
-    preview_path = upload_root / processed_filename
 
     command = [
         settings.ffmpeg_binary,
@@ -107,13 +105,11 @@ async def create_demo_workspace(
         if process.returncode != 0 or not source_path.is_file():
             message = stderr.decode("utf-8", errors="replace")[-1000:]
             raise RuntimeError(f"Could not create synthetic media fixture: {message}")
-        shutil.copyfile(source_path, preview_path)
         file_size = source_path.stat().st_size
         if file_size <= 0 or file_size > settings.demo_max_storage_bytes:
             raise RuntimeError("Synthetic media fixture exceeded the demo storage budget")
     except Exception as exc:
         source_path.unlink(missing_ok=True)
-        preview_path.unlink(missing_ok=True)
         if isinstance(exc, HTTPException):
             raise
         raise HTTPException(
@@ -126,7 +122,7 @@ async def create_demo_workspace(
         project_id=project.id,
         original_filename="frameflux-synthetic-test-pattern.mp4",
         stored_filename=stored_filename,
-        processed_filename=processed_filename,
+        processed_filename=None,
         media_type="video",
         mime_type="video/mp4",
         file_size=file_size,
@@ -135,7 +131,7 @@ async def create_demo_workspace(
         height=180,
         video_codec="h264",
         fps="24/1",
-        processing_status="completed",
+        processing_status="pending",
         processing_error=None,
     )
 
