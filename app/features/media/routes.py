@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.features.auth.dependencies import get_current_active_user
 from app.features.auth.models import User
+from app.features.demo.models import DemoSession
+from app.features.demo.service import enforce_demo_upload_quota, enforce_demo_job_quota
 from app.features.media.models import Media, MediaVersion
 from app.features.media.schemas import (
     BatchDownloadRequest,
@@ -35,7 +37,7 @@ from app.features.media.service import delete_media_file, save_multiple_uploads,
 from app.features.media.upload_progress import delete_upload_progress, get_upload_progress, set_upload_progress
 from app.features.media.conversion import ASPECT_RATIO_PRESETS, FPS_PRESETS
 from app.features.projects.service import get_project
-from app.infrastructure.database import get_db
+from app.infrastructure.database import AsyncSessionLocal, get_db
 from app.features.media.processor import get_uploaded_file
 from app.infrastructure.worker import create_worker_pool
 
@@ -72,11 +74,18 @@ async def get_media_or_404(
         )
 
     media_user_id = getattr(media, "user_id", None)
-    if user_id is not None and media_user_id is not None and media_user_id != user_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Media not found",
+    if user_id is not None:
+        demo_owner = await db.scalar(
+            select(DemoSession.id).where(DemoSession.user_id == user_id)
         )
+        if (
+            (demo_owner is not None and media_user_id != user_id)
+            or (demo_owner is None and media_user_id is not None and media_user_id != user_id)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Media not found",
+            )
 
     return media
 
@@ -86,6 +95,9 @@ async def verify_media_references_ownership(
     user_id: UUID,
     db: AsyncSession,
 ) -> None:
+    is_demo_user = await db.scalar(
+        select(DemoSession.id).where(DemoSession.user_id == user_id)
+    ) is not None
     for ref in media_refs:
         if ".." in ref or "/" in ref or "\\" in ref:
             raise HTTPException(
@@ -102,7 +114,10 @@ async def verify_media_references_ownership(
         result = await db.execute(query)
         matched_media = result.scalars().first()
         if isinstance(matched_media, Media):
-            if matched_media.user_id is not None and matched_media.user_id != user_id:
+            if (
+                (is_demo_user and matched_media.user_id != user_id)
+                or (not is_demo_user and matched_media.user_id is not None and matched_media.user_id != user_id)
+            ):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Cannot reference media belonging to another user",
@@ -131,17 +146,56 @@ async def enqueue_media_job(
     task_name: str,
     *args,
 ):
-    pool = await create_worker_pool()
+    media_id = None
+    demo_user_id = None
+    if args:
+        try:
+            media_id = UUID(str(args[0]))
+        except (ValueError, TypeError):
+            media_id = None
 
+    # Persist the queued state before publishing the job. Expiry cleanup must
+    # never remove an input file while its job is waiting in the shared queue.
+    if media_id is not None:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Media).where(Media.id == media_id))
+            media = result.scalar_one_or_none()
+            if media is not None and media.user_id is not None:
+                demo_session = await db.scalar(
+                    select(DemoSession.id).where(
+                        DemoSession.user_id == media.user_id,
+                        DemoSession.revoked_at.is_(None),
+                    )
+                )
+                if demo_session is not None:
+                    demo_user_id = media.user_id
+                    await enforce_demo_job_quota(
+                        db,
+                        demo_user_id,
+                        exclude_media_id=media.id,
+                    )
+                    media.processing_status = "queued"
+                    media.processing_error = None
+                    await db.commit()
+
+    pool = await create_worker_pool()
     try:
-        job = await pool.enqueue_job(
-            task_name,
-            *args,
-        )
+        try:
+            job = await pool.enqueue_job(task_name, *args)
+        except Exception:
+            if demo_user_id is not None and media_id is not None:
+                async with AsyncSessionLocal() as db:
+                    result = await db.execute(select(Media).where(Media.id == media_id))
+                    media = result.scalar_one_or_none()
+                    if media is not None and media.user_id == demo_user_id:
+                        media.processing_status = "failed"
+                        media.processing_error = "The background queue did not accept this job."
+                        await db.commit()
+            raise
+
         if job and args:
-            media_id = str(args[0])
             await set_processing_progress(
-                media_id=media_id,
+                media_id=str(args[0]),
                 status="queued",
                 progress=0,
                 job_id=job.job_id,
@@ -158,9 +212,9 @@ async def mark_processing_pending(
     media: Media,
     db: AsyncSession,
 ):
-    media.processing_status = "pending"
+    # "queued" is persisted before the worker starts; "pending" means not yet submitted.
+    media.processing_status = "queued"
     media.processing_error = None
-
     await db.commit()
 
 
@@ -175,7 +229,10 @@ async def upload_media(
     db: AsyncSession = Depends(get_db),
 ):
     upload_id = str(uuid4())
+    media = None
     try:
+        if file.size is not None:
+            await enforce_demo_upload_quota(db, current_user.id, file.size)
         await set_upload_progress(
             upload_id=upload_id,
             user_id=current_user.id,
@@ -186,6 +243,7 @@ async def upload_media(
             uploaded_size=0,
         )
         media = await save_upload(file)
+        await enforce_demo_upload_quota(db, current_user.id, media.file_size)
         media.user_id = current_user.id
 
         db.add(media)
@@ -204,6 +262,8 @@ async def upload_media(
         return media
 
     except HTTPException:
+        if media is not None:
+            await delete_media_file(media.stored_filename)
         await delete_upload_progress(upload_id)
         raise
     except ValueError as exc:
@@ -239,7 +299,21 @@ async def upload_multiple_media(
         )
 
     try:
+        known_sizes = [item.size for item in files]
+        if all(size is not None for size in known_sizes):
+            await enforce_demo_upload_quota(
+                db,
+                current_user.id,
+                sum(int(size or 0) for size in known_sizes),
+                incoming_files=len(files),
+            )
         media_list = await save_multiple_uploads(files)
+        await enforce_demo_upload_quota(
+            db,
+            current_user.id,
+            sum(item.file_size for item in media_list),
+            incoming_files=len(media_list),
+        )
         for media in media_list:
             media.user_id = current_user.id
             db.add(media)
@@ -248,6 +322,9 @@ async def upload_multiple_media(
             await db.refresh(media)
         return media_list
     except HTTPException:
+        if "media_list" in locals():
+            for uploaded_media in media_list:
+                await delete_media_file(uploaded_media.stored_filename)
         raise
     except ValueError as exc:
         raise HTTPException(
@@ -284,8 +361,21 @@ async def get_upload_progress_endpoint(
 async def resumable_init(
     data: ResumableInitRequest,
     current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
 ):
     try:
+        await enforce_demo_upload_quota(db, current_user.id, data.total_size)
+        demo_session = await db.scalar(
+            select(DemoSession.id).where(
+                DemoSession.user_id == current_user.id,
+                DemoSession.revoked_at.is_(None),
+            )
+        )
+        if demo_session is not None and data.chunk_size is not None and data.chunk_size > get_settings().demo_max_chunk_size_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="Demo upload chunks are limited to 2 MB.",
+            )
         upload_id = await ResumableUploadService.init_upload(
             original_filename=data.original_filename,
             total_size=data.total_size,
@@ -394,7 +484,13 @@ async def list_media(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    query = select(Media).where((Media.user_id == current_user.id) | (Media.user_id.is_(None)))
+    demo_owner = await db.scalar(
+        select(DemoSession.id).where(DemoSession.user_id == current_user.id)
+    )
+    if demo_owner is not None:
+        query = select(Media).where(Media.user_id == current_user.id)
+    else:
+        query = select(Media).where((Media.user_id == current_user.id) | (Media.user_id.is_(None)))
     if search:
         query = query.where(Media.original_filename.ilike(f"%{search}%"))
     if media_type:
