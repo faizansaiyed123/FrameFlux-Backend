@@ -180,6 +180,7 @@ async def enforce_demo_upload_quota(
     db: AsyncSession,
     user_id: UUID,
     incoming_bytes: int,
+    incoming_files: int = 1,
 ) -> None:
     demo_session = await get_active_demo_session(db, user_id)
     if demo_session is None:
@@ -196,7 +197,7 @@ async def enforce_demo_upload_quota(
             )
         )
     ).one()
-    if count >= settings.demo_max_media_files or total_bytes + incoming_bytes > settings.demo_max_storage_bytes:
+    if count + incoming_files > settings.demo_max_media_files or total_bytes + incoming_bytes > settings.demo_max_storage_bytes:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="This demo workspace has reached its media limit. End the demo to reset the workspace.",
@@ -219,7 +220,7 @@ async def enforce_demo_job_quota(db: AsyncSession, user_id: UUID) -> None:
             ProcessingJob.status.in_(["queued", "running", "retrying"]),
         )
     )
-    if int(media_active or 0) + int(jobs_active or 0) > settings.demo_max_concurrent_jobs_per_user:
+    if max(int(media_active or 0), int(jobs_active or 0)) >= settings.demo_max_concurrent_jobs_per_user:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="The demo workspace allows one active processing job at a time.",
