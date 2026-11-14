@@ -88,6 +88,7 @@ async def get_current_user(
     # Tokens carrying a demo session claim must resolve to a live DB session.
     # Ordinary account tokens keep the existing authentication path.
     demo_session_claim = payload.get("demo_session_id")
+    demo_session = None
     if demo_session_claim is not None:
         try:
             demo_session_id = UUID(str(demo_session_claim))
