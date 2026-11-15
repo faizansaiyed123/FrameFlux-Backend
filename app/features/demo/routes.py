@@ -1,3 +1,5 @@
+import ipaddress
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +23,20 @@ settings = get_settings()
 
 def _client_ip(request: Request) -> str:
     client_host = request.client.host if request.client else "unknown"
+
+    # Railway's public HTTP edge overwrites X-Real-IP with the observed client
+    # address. It is preferable to X-Forwarded-For there because Railway does
+    # not guarantee a fixed XFF hop count. This opt-in mode must not be enabled
+    # for private-network or TCP-proxy ingress, where the edge is bypassed.
+    if settings.trust_railway_x_real_ip:
+        real_ip = request.headers.get("x-real-ip", "").strip()
+        if not real_ip:
+            return client_host
+        try:
+            return str(ipaddress.ip_address(real_ip))
+        except ValueError:
+            return client_host
+
     if settings.trust_proxy_headers:
         forwarded = request.headers.get("x-forwarded-for")
         if forwarded:
