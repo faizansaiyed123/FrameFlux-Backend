@@ -42,6 +42,26 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Reconcile and validate the dependency lock
+        run: |
+          uv lock
+          uv lock --check
+
+      - name: Upload reconciled lockfile for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: frameflux-recruiter-uv-lock
+          path: uv.lock
+          retention-days: 1
+
       - name: Build recruiter runtime image
         run: docker build --pull --file Dockerfile.recruiter-demo --tag frameflux-recruiter-demo:ci .
 
