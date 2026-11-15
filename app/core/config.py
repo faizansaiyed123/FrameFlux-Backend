@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     api_base_url: str = "http://localhost:8000"
     storage_base_url: str = "http://localhost:8000"
     trust_proxy_headers: bool = False
+    # Only enable behind Railway's public HTTP edge, which replaces X-Real-IP.
+    # Do not enable when this service can receive direct private/TCP-proxy traffic.
+    trust_railway_x_real_ip: bool = False
 
     upload_dir: str = "storage/uploads"
     processed_dir: str = "storage/processed"
@@ -25,14 +28,14 @@ class Settings(BaseSettings):
     ffmpeg_binary: str = "ffmpeg"
     ffprobe_binary: str = "ffprobe"
 
-    max_upload_size_bytes: int = 500 * 1024 * 1024  
-    max_chunk_size_bytes: int = 50 * 1024 * 1024   
+    max_upload_size_bytes: int = 500 * 1024 * 1024
+    max_chunk_size_bytes: int = 50 * 1024 * 1024
 
-    worker_job_timeout: int = 3600  
+    worker_job_timeout: int = 3600
     worker_max_jobs: int = 4
 
-    max_video_duration_seconds: int = 7200  
-    max_video_resolution: int = 3840  
+    max_video_duration_seconds: int = 7200
+    max_video_resolution: int = 3840
     max_concurrent_jobs_per_user: int = 10
 
     # Recruiter demo is opt-in and defaults to disabled.
