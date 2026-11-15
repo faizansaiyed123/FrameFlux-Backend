@@ -27,10 +27,9 @@ def verify_password(password: str, password_hash: str) -> bool:
 def create_access_token(
     user_id: UUID,
     extra_claims: dict[str, Any] | None = None,
-    expires_minutes: int | None = None,
 ) -> str:
     now = datetime.now(timezone.utc)
-    expire = now + timedelta(minutes=expires_minutes or settings.jwt_expire_minutes)
+    expire = now + timedelta(minutes=settings.jwt_expire_minutes)
     claims: dict[str, Any] = {
         "sub": str(user_id),
         "iat": now,

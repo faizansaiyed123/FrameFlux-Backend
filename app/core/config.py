@@ -35,18 +35,6 @@ class Settings(BaseSettings):
     max_video_resolution: int = 3840  
     max_concurrent_jobs_per_user: int = 10
 
-    # Recruiter demo is opt-in and defaults to disabled.
-    demo_enabled: bool = False
-    demo_session_ttl_minutes: int = 120
-    demo_max_active_sessions_per_ip: int = 2
-    demo_bootstrap_requests_per_ip: int = 3
-    demo_bootstrap_window_seconds: int = 3600
-    demo_max_upload_size_bytes: int = 15 * 1024 * 1024
-    demo_max_chunk_size_bytes: int = 2 * 1024 * 1024
-    demo_max_storage_bytes: int = 40 * 1024 * 1024
-    demo_max_media_files: int = 4
-    demo_max_concurrent_jobs_per_user: int = 1
-
     jwt_secret_key: str
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60

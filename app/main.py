@@ -11,7 +11,6 @@ from app.core.config import get_settings
 from app.core.exceptions import AppError, RateLimitedError
 from app.core.logging import configure_logging, get_logger, request_id_var
 from app.features.auth.routes import router as auth_router
-from app.features.demo.routes import router as demo_router
 from app.features.health.routes import router as health_router
 from app.features.jobs.routes import router as jobs_router
 from app.features.media.routes import router as media_router
@@ -175,7 +174,6 @@ def root():
 
 
 app.include_router(auth_router)
-app.include_router(demo_router)
 app.include_router(health_router)
 app.include_router(jobs_router)
 app.include_router(media_router)
