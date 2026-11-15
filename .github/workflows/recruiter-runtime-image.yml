@@ -1,0 +1,65 @@
+name: Recruiter Runtime Image
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .dockerignore
+      - .env.example
+      - .github/workflows/recruiter-runtime-image.yml
+      - Dockerfile.recruiter-demo
+      - README.md
+      - app/**
+      - deploy/supervisord.recruiter-demo.conf
+      - migrations/**
+      - pyproject.toml
+      - scripts/start-recruiter-demo.sh
+      - storage/**
+      - uv.lock
+  push:
+    branches: [main]
+    paths:
+      - .dockerignore
+      - .env.example
+      - .github/workflows/recruiter-runtime-image.yml
+      - Dockerfile.recruiter-demo
+      - README.md
+      - app/**
+      - deploy/supervisord.recruiter-demo.conf
+      - migrations/**
+      - pyproject.toml
+      - scripts/start-recruiter-demo.sh
+      - storage/**
+      - uv.lock
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build recruiter runtime image
+        run: docker build --pull --file Dockerfile.recruiter-demo --tag frameflux-recruiter-demo:ci .
+
+      - name: Verify runtime binaries and import the API/worker
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint /bin/sh \
+            --env DATABASE_URL='postgresql+asyncpg://test:test@localhost:5432/test' \
+            --env REDIS_URL='redis://localhost:6379/0' \
+            --env JWT_SECRET_KEY='ci-only-secret-that-is-long-enough-for-frameflux' \
+            --env ENVIRONMENT=test \
+            --env APP_ORIGIN='https://recruiter.example.invalid' \
+            --env API_BASE_URL='https://api.example.invalid' \
+            --env STORAGE_BASE_URL='https://api.example.invalid' \
+            frameflux-recruiter-demo:ci \
+            -ec '
+              ffmpeg -version >/dev/null
+              ffprobe -version >/dev/null
+              /usr/bin/supervisord --version
+              uv run --no-sync python -c "from app.main import app; from app.infrastructure.worker import WorkerSettings; assert app is not None; assert WorkerSettings.functions"
+            '
