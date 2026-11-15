@@ -116,17 +116,6 @@ class ResumableUploadService:
         if meta.get("status") not in ("in_progress", "paused"):
             raise ValueError(f"Cannot store chunk when status is {meta.get('status')}")
 
-        total_size = int(meta["total_size"])
-        chunk_size = int(meta["chunk_size"])
-        expected_chunks = (total_size + chunk_size - 1) // chunk_size
-        if index >= expected_chunks:
-            raise ValueError("Chunk index is outside the declared upload size")
-        expected_size = min(chunk_size, total_size - (index * chunk_size))
-        if len(data) != expected_size:
-            raise ValueError(
-                f"Chunk {index} must contain exactly {expected_size} bytes"
-            )
-
         chunk_path = _chunk_path(upload_id, index)
         chunk_path.parent.mkdir(parents=True, exist_ok=True)
         with open(chunk_path, "wb") as f:
@@ -199,31 +188,13 @@ class ResumableUploadService:
 
         final_path = Path(settings.upload_dir) / meta["stored_filename"]
         final_path.parent.mkdir(parents=True, exist_ok=True)
-        written_size = 0
-        try:
-            with open(final_path, "wb") as dst:
-                for idx in range(expected_chunks):
-                    part_path = _chunk_path(upload_id, idx)
-                    if not part_path.exists():
-                        raise ValueError(f"Chunk {idx} is missing on disk")
-                    expected_part_size = min(
-                        chunk_size,
-                        total_size - (idx * chunk_size),
-                    )
-                    actual_part_size = part_path.stat().st_size
-                    if actual_part_size != expected_part_size:
-                        raise ValueError(
-                            f"Chunk {idx} has {actual_part_size} bytes; expected {expected_part_size}"
-                        )
-                    with open(part_path, "rb") as src:
-                        shutil.copyfileobj(src, dst)
-                    written_size += actual_part_size
-
-            if written_size != total_size or final_path.stat().st_size != total_size:
-                raise ValueError("Assembled upload size does not match the declared total size")
-        except Exception:
-            final_path.unlink(missing_ok=True)
-            raise
+        with open(final_path, "wb") as dst:
+            for idx in range(expected_chunks):
+                part_path = _chunk_path(upload_id, idx)
+                if not part_path.exists():
+                    raise ValueError(f"Chunk {idx} is missing on disk")
+                with open(part_path, "rb") as src:
+                    shutil.copyfileobj(src, dst)
 
         effective_user_id = user_id
         if effective_user_id is None and meta.get("user_id"):

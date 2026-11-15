@@ -5,7 +5,6 @@ from sqlalchemy import engine_from_config, pool
 
 from app.core.config import get_settings
 from app.features.auth.models import User
-from app.features.demo.models import DemoSession
 from app.features.media.models import Media, MediaVersion
 from app.features.jobs.models import ProcessingJob
 from app.features.projects.models import Project
@@ -16,7 +15,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-_ = (User, DemoSession, Media, MediaVersion, ProcessingJob, Project)
+_ = (User, Media, MediaVersion, ProcessingJob, Project)
 
 target_metadata = Base.metadata
 

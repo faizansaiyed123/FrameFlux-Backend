@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.features.auth.dependencies import get_current_active_user
 from app.features.auth.models import User
-from app.features.demo.service import enforce_demo_upload_quota, enforce_demo_job_quota
 from app.features.media.models import Media, MediaVersion
 from app.features.media.schemas import (
     BatchDownloadRequest,
@@ -36,7 +35,7 @@ from app.features.media.service import delete_media_file, save_multiple_uploads,
 from app.features.media.upload_progress import delete_upload_progress, get_upload_progress, set_upload_progress
 from app.features.media.conversion import ASPECT_RATIO_PRESETS, FPS_PRESETS
 from app.features.projects.service import get_project
-from app.infrastructure.database import AsyncSessionLocal, get_db
+from app.infrastructure.database import get_db
 from app.features.media.processor import get_uploaded_file
 from app.infrastructure.worker import create_worker_pool
 
@@ -59,7 +58,6 @@ async def get_media_or_404(
     media_id: UUID,
     db: AsyncSession,
     user_id: UUID | None = None,
-    is_demo_user: bool = False,
 ) -> Media:
     result = await db.execute(
         select(Media).where(Media.id == media_id)
@@ -74,15 +72,11 @@ async def get_media_or_404(
         )
 
     media_user_id = getattr(media, "user_id", None)
-    if user_id is not None:
-        if (
-            (is_demo_user and media_user_id != user_id)
-            or (not is_demo_user and media_user_id is not None and media_user_id != user_id)
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Media not found",
-            )
+    if user_id is not None and media_user_id is not None and media_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Media not found",
+        )
 
     return media
 
@@ -91,7 +85,6 @@ async def verify_media_references_ownership(
     media_refs: list[str],
     user_id: UUID,
     db: AsyncSession,
-    is_demo_user: bool = False,
 ) -> None:
     for ref in media_refs:
         if ".." in ref or "/" in ref or "\\" in ref:
@@ -109,10 +102,7 @@ async def verify_media_references_ownership(
         result = await db.execute(query)
         matched_media = result.scalars().first()
         if isinstance(matched_media, Media):
-            if (
-                (is_demo_user and matched_media.user_id != user_id)
-                or (not is_demo_user and matched_media.user_id is not None and matched_media.user_id != user_id)
-            ):
+            if matched_media.user_id is not None and matched_media.user_id != user_id:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Cannot reference media belonging to another user",
@@ -140,50 +130,18 @@ def verify_file_path_safety(file_path: Path, storage_dir: Path) -> Path:
 async def enqueue_media_job(
     task_name: str,
     *args,
-    demo_user_id: UUID | None = None,
 ):
-    media_id = None
-    if args:
-        try:
-            media_id = UUID(str(args[0]))
-        except (ValueError, TypeError):
-            media_id = None
-
-    # Persist the queued state before publishing the job. Expiry cleanup must
-    # never remove an input file while its job is waiting in the shared queue.
-    if media_id is not None and demo_user_id is not None:
-        async with AsyncSessionLocal() as db:
-            result = await db.execute(select(Media).where(Media.id == media_id))
-            media = result.scalar_one_or_none()
-            if media is None or media.user_id != demo_user_id:
-                raise HTTPException(status_code=404, detail="Media not found")
-            await enforce_demo_job_quota(
-                db,
-                demo_user_id,
-                exclude_media_id=media.id,
-            )
-            media.processing_status = "queued"
-            media.processing_error = None
-            await db.commit()
-
     pool = await create_worker_pool()
-    try:
-        try:
-            job = await pool.enqueue_job(task_name, *args)
-        except Exception:
-            if demo_user_id is not None and media_id is not None:
-                async with AsyncSessionLocal() as db:
-                    result = await db.execute(select(Media).where(Media.id == media_id))
-                    media = result.scalar_one_or_none()
-                    if media is not None and media.user_id == demo_user_id:
-                        media.processing_status = "failed"
-                        media.processing_error = "The background queue did not accept this job."
-                        await db.commit()
-            raise
 
+    try:
+        job = await pool.enqueue_job(
+            task_name,
+            *args,
+        )
         if job and args:
+            media_id = str(args[0])
             await set_processing_progress(
-                media_id=str(args[0]),
+                media_id=media_id,
                 status="queued",
                 progress=0,
                 job_id=job.job_id,
@@ -200,9 +158,9 @@ async def mark_processing_pending(
     media: Media,
     db: AsyncSession,
 ):
-    # "queued" is persisted before the worker starts; "pending" means not yet submitted.
-    media.processing_status = "queued"
+    media.processing_status = "pending"
     media.processing_error = None
+
     await db.commit()
 
 
@@ -217,10 +175,7 @@ async def upload_media(
     db: AsyncSession = Depends(get_db),
 ):
     upload_id = str(uuid4())
-    media = None
     try:
-        if file.size is not None:
-            await enforce_demo_upload_quota(db, current_user.id, file.size, is_demo_user=getattr(current_user, "is_demo_session", False))
         await set_upload_progress(
             upload_id=upload_id,
             user_id=current_user.id,
@@ -231,7 +186,6 @@ async def upload_media(
             uploaded_size=0,
         )
         media = await save_upload(file)
-        await enforce_demo_upload_quota(db, current_user.id, media.file_size, is_demo_user=getattr(current_user, "is_demo_session", False))
         media.user_id = current_user.id
 
         db.add(media)
@@ -250,8 +204,6 @@ async def upload_media(
         return media
 
     except HTTPException:
-        if media is not None:
-            await delete_media_file(media.stored_filename)
         await delete_upload_progress(upload_id)
         raise
     except ValueError as exc:
@@ -287,25 +239,7 @@ async def upload_multiple_media(
         )
 
     try:
-        known_sizes = [item.size for item in files]
-        if all(size is not None for size in known_sizes):
-            await enforce_demo_upload_quota(
-                db,
-                current_user.id,
-                max(int(size or 0) for size in known_sizes),
-                incoming_files=len(files),
-                is_demo_user=getattr(current_user, "is_demo_session", False),
-                total_incoming_bytes=sum(int(size or 0) for size in known_sizes),
-            )
         media_list = await save_multiple_uploads(files)
-        await enforce_demo_upload_quota(
-            db,
-            current_user.id,
-            max(item.file_size for item in media_list),
-            incoming_files=len(media_list),
-            is_demo_user=getattr(current_user, "is_demo_session", False),
-            total_incoming_bytes=sum(item.file_size for item in media_list),
-        )
         for media in media_list:
             media.user_id = current_user.id
             db.add(media)
@@ -314,9 +248,6 @@ async def upload_multiple_media(
             await db.refresh(media)
         return media_list
     except HTTPException:
-        if "media_list" in locals():
-            for uploaded_media in media_list:
-                await delete_media_file(uploaded_media.stored_filename)
         raise
     except ValueError as exc:
         raise HTTPException(
@@ -353,21 +284,8 @@ async def get_upload_progress_endpoint(
 async def resumable_init(
     data: ResumableInitRequest,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db),
 ):
     try:
-        is_demo_user = getattr(current_user, "is_demo_session", False)
-        await enforce_demo_upload_quota(
-            db,
-            current_user.id,
-            data.total_size,
-            is_demo_user=is_demo_user,
-        )
-        if is_demo_user and data.chunk_size is not None and data.chunk_size > get_settings().demo_max_chunk_size_bytes:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail="Demo upload chunks are limited to 2 MB.",
-            )
         upload_id = await ResumableUploadService.init_upload(
             original_filename=data.original_filename,
             total_size=data.total_size,
@@ -386,22 +304,10 @@ async def resumable_chunk(
     index: int,
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db),
 ):
     if index < 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chunk index must be non-negative")
-    is_demo_user = getattr(current_user, "is_demo_session", False)
-    if is_demo_user and file.size is not None and file.size > get_settings().demo_max_chunk_size_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Demo upload chunks are limited to 2 MB.",
-        )
     content = await file.read()
-    if is_demo_user and len(content) > get_settings().demo_max_chunk_size_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Demo upload chunks are limited to 2 MB.",
-        )
     try:
         await ResumableUploadService.store_chunk(upload_id, index, content, user_id=current_user.id)
     except HTTPException:
@@ -438,22 +344,10 @@ async def resumable_retry(
     index: int,
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db),
 ) -> ChunkUploadResponse:
     if index < 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chunk index must be non-negative")
-    is_demo_user = getattr(current_user, "is_demo_session", False)
-    if is_demo_user and file.size is not None and file.size > get_settings().demo_max_chunk_size_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Demo upload chunks are limited to 2 MB.",
-        )
     content = await file.read()
-    if is_demo_user and len(content) > get_settings().demo_max_chunk_size_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Demo upload chunks are limited to 2 MB.",
-        )
     try:
         await ResumableUploadService.store_chunk(upload_id, index, content, user_id=current_user.id)
     except HTTPException:
@@ -500,10 +394,7 @@ async def list_media(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if getattr(current_user, "is_demo_session", False):
-        query = select(Media).where(Media.user_id == current_user.id)
-    else:
-        query = select(Media).where((Media.user_id == current_user.id) | (Media.user_id.is_(None)))
+    query = select(Media).where((Media.user_id == current_user.id) | (Media.user_id.is_(None)))
     if search:
         query = query.where(Media.original_filename.ilike(f"%{search}%"))
     if media_type:
@@ -526,7 +417,7 @@ async def get_media(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    return await get_media_or_404(media_id, db, user_id=current_user.id)
 
 
 @router.get(
@@ -539,7 +430,7 @@ async def get_media_status_endpoint(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     return await get_media_progress(media_id, db_media=media)
 
 
@@ -553,7 +444,7 @@ async def get_media_progress_endpoint(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     return await get_media_progress(media_id, db_media=media)
 
 
@@ -574,21 +465,12 @@ async def get_media_job_endpoint(
             detail=f"Job '{job_id}' not found",
         )
     media_id = job_data.get("media_id")
-    is_demo_user = getattr(current_user, "is_demo_session", False)
-    if is_demo_user and not media_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Job '{job_id}' not found",
-        )
     if media_id:
         try:
             m_uuid = UUID(media_id)
             res = await db.execute(select(Media).where(Media.id == m_uuid))
             media = res.scalar_one_or_none()
-            if media and (
-                (is_demo_user and media.user_id != current_user.id)
-                or (not is_demo_user and media.user_id is not None and media.user_id != current_user.id)
-            ):
+            if media and media.user_id is not None and media.user_id != current_user.id:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Job '{job_id}' not found",
@@ -604,7 +486,7 @@ async def process_media_endpoint(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
 
     if media.processing_status == "processing":
         raise HTTPException(
@@ -624,7 +506,6 @@ async def process_media_endpoint(
         "process_media_task",
         str(media.id),
         media.stored_filename,
-        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
     )
 
     return {
@@ -641,7 +522,7 @@ async def convert_media_endpoint(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     extension = data.format.lower().lstrip(".")
     output_filename = f"{media_id}_converted_{uuid4().hex[:8]}.{extension}"
     options = data.model_dump(exclude_none=True)
@@ -668,7 +549,6 @@ async def convert_media_endpoint(
         media.stored_filename,
         output_filename,
         options,
-        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
     )
     await mark_processing_pending(media, db)
     return {
@@ -686,7 +566,7 @@ async def compress_media_endpoint(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     extension = data.format.lower().lstrip(".") if data.format else "mp4"
     output_filename = f"{media_id}_compressed_{uuid4().hex[:8]}.{extension}"
     options = data.model_dump(exclude_none=True)
@@ -702,7 +582,6 @@ async def compress_media_endpoint(
         output_filename,
         options,
         target_size_mb,
-        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
     )
     await mark_processing_pending(media, db)
     return {
@@ -735,7 +614,7 @@ async def edit_media_endpoint(
             detail="End time must be greater than start time",
         )
 
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     output_filename = f"{media_id}_{data.operation}_{uuid4().hex[:8]}.mp4"
     job = await enqueue_media_job(
         "edit_media_task",
@@ -745,7 +624,6 @@ async def edit_media_endpoint(
         data.operation,
         data.start,
         data.end,
-        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
     )
     await mark_processing_pending(media, db)
     return {
@@ -764,7 +642,7 @@ async def attach_media_to_project(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     project = await get_project(db, project_id, user_id=current_user.id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -781,7 +659,7 @@ async def get_media_file(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     file_path = get_uploaded_file(media.stored_filename)
     settings = get_settings()
     safe_path = verify_file_path_safety(file_path, Path(settings.upload_dir))
@@ -794,7 +672,7 @@ async def get_processed_media(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     if not media.processed_filename:
         raise HTTPException(status_code=404, detail="Processed media not available")
     file_path = get_uploaded_file(media.processed_filename)
@@ -811,7 +689,7 @@ async def download_processed_media(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     if version_id:
         result = await db.execute(select(MediaVersion).where(MediaVersion.id == version_id, MediaVersion.media_id == media_id))
         version = result.scalar_one_or_none()
@@ -861,7 +739,7 @@ async def delete_media(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
 
     await delete_media_file(media.stored_filename)
 
@@ -879,8 +757,8 @@ async def merge_media_endpoint(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
-    await verify_media_references_ownership(data.media_ids, current_user.id, db, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
+    await verify_media_references_ownership(data.media_ids, current_user.id, db)
 
     input_filenames: list[str] = []
     for ref in data.media_ids:
@@ -901,7 +779,6 @@ async def merge_media_endpoint(
         str(media_id),
         input_filenames,
         output_filename,
-        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
     )
     await mark_processing_pending(media, db)
     return {
@@ -920,7 +797,7 @@ async def transform_media_endpoint(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     output_filename = f"{media_id}_{data.operation}_{uuid4().hex[:8]}.mp4"
     options = data.model_dump(exclude_none=True)
     job = await enqueue_media_job(
@@ -929,7 +806,6 @@ async def transform_media_endpoint(
         media.stored_filename,
         output_filename,
         options,
-        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
     )
     await mark_processing_pending(media, db)
     return {
@@ -948,7 +824,7 @@ async def freeze_frame_endpoint(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     output_filename = f"{media_id}_freeze_{uuid4().hex[:8]}.mp4"
     job = await enqueue_media_job(
         "freeze_frame_task",
@@ -957,7 +833,6 @@ async def freeze_frame_endpoint(
         output_filename,
         data.timestamp,
         data.duration,
-        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
     )
     await mark_processing_pending(media, db)
     return {
@@ -976,13 +851,13 @@ async def overlay_media_endpoint(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     if data.image_filename:
-        await verify_media_references_ownership([data.image_filename], current_user.id, db, is_demo_user=getattr(current_user, "is_demo_session", False))
+        await verify_media_references_ownership([data.image_filename], current_user.id, db)
     if data.overlays:
         for ov in data.overlays:
             if ov.image_filename:
-                await verify_media_references_ownership([ov.image_filename], current_user.id, db, is_demo_user=getattr(current_user, "is_demo_session", False))
+                await verify_media_references_ownership([ov.image_filename], current_user.id, db)
 
     operation_name = data.operation or ("multi_overlay" if data.overlays else "overlay")
     output_filename = f"{media_id}_{operation_name}_{uuid4().hex[:8]}.mp4"
@@ -993,7 +868,6 @@ async def overlay_media_endpoint(
         media.stored_filename,
         output_filename,
         options,
-        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
     )
     await mark_processing_pending(media, db)
     return {
@@ -1012,7 +886,7 @@ async def split_media_endpoint(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     output_prefix = f"{media_id}_split_{uuid4().hex[:8]}"
     job = await enqueue_media_job(
         "split_media_task",
@@ -1020,7 +894,6 @@ async def split_media_endpoint(
         media.stored_filename,
         output_prefix,
         data.split_points,
-        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
     )
     await mark_processing_pending(media, db)
     return {
@@ -1039,7 +912,7 @@ async def keep_clips_endpoint(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     output_filename = f"{media_id}_keep_{uuid4().hex[:8]}.mp4"
     clip_tuples = [[c.start, c.end] for c in data.clips]
     job = await enqueue_media_job(
@@ -1049,7 +922,6 @@ async def keep_clips_endpoint(
         output_filename,
         "keep",
         clip_tuples,
-        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
     )
     await mark_processing_pending(media, db)
     return {
@@ -1068,7 +940,7 @@ async def delete_clips_endpoint(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     output_filename = f"{media_id}_delete_{uuid4().hex[:8]}.mp4"
     clip_tuples = [[c.start, c.end] for c in data.clips]
     job = await enqueue_media_job(
@@ -1078,7 +950,6 @@ async def delete_clips_endpoint(
         output_filename,
         "delete",
         clip_tuples,
-        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
     )
     await mark_processing_pending(media, db)
     return {
@@ -1097,7 +968,7 @@ async def reorder_clips_endpoint(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
 
     resolved_filenames: list[str] = []
     for ref in data.media_ids:
@@ -1136,7 +1007,6 @@ async def reorder_clips_endpoint(
         str(media_id),
         resolved_filenames,
         output_filename,
-        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
     )
     await mark_processing_pending(media, db)
     return {
@@ -1155,8 +1025,8 @@ async def append_clips_endpoint(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
-    await verify_media_references_ownership(data.media_ids, current_user.id, db, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
+    await verify_media_references_ownership(data.media_ids, current_user.id, db)
     ordered_ids = [media.stored_filename]
     for ref in data.media_ids:
         try:
@@ -1176,7 +1046,6 @@ async def append_clips_endpoint(
         str(media_id),
         ordered_ids,
         output_filename,
-        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
     )
     await mark_processing_pending(media, db)
     return {
@@ -1195,7 +1064,7 @@ async def process_media_unified_endpoint(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
 
     if media.processing_status == "processing":
         raise HTTPException(
@@ -1211,7 +1080,6 @@ async def process_media_unified_endpoint(
         [op.model_dump() for op in data.operations],
         str(uuid4()),
         str(current_user.id),
-        demo_user_id=(current_user.id if getattr(current_user, "is_demo_session", False) else None),
     )
 
     return {
@@ -1228,7 +1096,7 @@ async def list_media_versions(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     result = await db.execute(
         select(MediaVersion).where(MediaVersion.media_id == media_id).order_by(MediaVersion.created_at.desc())
     )
@@ -1253,7 +1121,7 @@ async def get_media_version(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     result = await db.execute(select(MediaVersion).where(MediaVersion.id == version_id, MediaVersion.media_id == media_id))
     version = result.scalar_one_or_none()
     if version is None:
@@ -1275,7 +1143,7 @@ async def delete_media_version(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     result = await db.execute(select(MediaVersion).where(MediaVersion.id == version_id, MediaVersion.media_id == media_id))
     version = result.scalar_one_or_none()
     if version is None:
@@ -1292,7 +1160,7 @@ async def restore_media_version(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     result = await db.execute(select(MediaVersion).where(MediaVersion.id == version_id, MediaVersion.media_id == media_id))
     version = result.scalar_one_or_none()
     if version is None:
@@ -1319,7 +1187,7 @@ async def download_media_version(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     result = await db.execute(select(MediaVersion).where(MediaVersion.id == version_id, MediaVersion.media_id == media_id))
     version = result.scalar_one_or_none()
     if version is None:
@@ -1338,7 +1206,7 @@ async def create_media_version(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new version for a media file."""
-    media = await get_media_or_404(media_id, db, user_id=current_user.id, is_demo_user=getattr(current_user, "is_demo_session", False))
+    media = await get_media_or_404(media_id, db, user_id=current_user.id)
     
     stored_filename = data.get("stored_filename")
     label = data.get("label", "Processed")
