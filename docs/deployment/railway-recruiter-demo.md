@@ -1,41 +1,85 @@
-# FrameFlux deployment on Railway
+# FrameFlux recruiter demo deployment on Railway
 
-This repository contains the production container used for the FrameFlux API and worker.
+This branch is deployment-only preparation for an isolated recruiter environment.
 
-## Services
+## Runtime topology
 
-Run four isolated services in the Railway project:
+Use one Railway service for the recruiter API and ARQ worker together:
 
-1. PostgreSQL — application database.
-2. Redis — ARQ queue, resumable-upload manifests and progress.
-3. API — this repository, using the root Dockerfile and railway.json.
-4. Worker — this repository, using the same Dockerfile with the service start command overridden to `uv run --no-sync arq app.infrastructure.worker.WorkerSettings`.
+1. FrameFlux recruiter service — builds Dockerfile.recruiter-demo, runs FastAPI and the ARQ worker under Supervisor, and owns the media volume at /app/storage.
+2. PostgreSQL — dedicated database for recruiter sessions and synthetic product data.
+3. Redis — dedicated ARQ queue, upload manifests, and progress state.
 
-The API service should expose its public URL and use `/health/ready` for the deployment healthcheck.
+This single-service API + worker arrangement is intentional. Railway volumes attach to one service, so the API and worker must share the same process/container when the application uses local shared media storage. Do not create separate API and worker services that each mount different volumes and expect the files to be shared.
 
-## Required API variables
+## Recruiter service
 
-Set these from the Railway PostgreSQL/Redis service connection values and the public frontend/API URLs:
+railway.json selects Dockerfile.recruiter-demo.
 
-- `DATABASE_URL`
-- `REDIS_URL`
-- `APP_ORIGIN`
-- `API_BASE_URL`
-- `STORAGE_BASE_URL`
-- `JWT_SECRET_KEY`
+The startup script:
 
-For the isolated recruiter demo deployment, explicitly enable `DEMO_ENABLED=true` and keep the demo limits documented in `.env.example`.
+- creates the mounted storage directories,
+- waits for PostgreSQL by retrying Alembic migrations,
+- starts FastAPI,
+- starts the ARQ worker,
+- keeps both processes supervised and restartable.
 
-Do not copy real production/customer data into this environment.
+The Railway service should expose the API and use:
 
-## Worker
+- public HTTPS networking,
+- /health/ready as the healthcheck,
+- a persistent volume mounted at /app/storage.
 
-The worker needs the same `DATABASE_URL`, `REDIS_URL`, FFmpeg settings, job limits and `JWT_SECRET_KEY` values as the API. It does not need a public HTTP endpoint.
+The recruiter deployment must use its own isolated Postgres, Redis and storage. Do not copy production/customer data.
 
-Attach a persistent volume to both API and worker services at `/app/storage` so the worker can consume uploaded media and the API can serve processed files.
+## Required variables
+
+Set these on the recruiter service from the dedicated Railway resources and generated deployment URLs:
+
+- DATABASE_URL
+- REDIS_URL
+- APP_ORIGIN
+- API_BASE_URL
+- STORAGE_BASE_URL
+- JWT_SECRET_KEY
+
+Keep these recruiter controls enabled only on this isolated deployment:
+
+- DEMO_ENABLED=true
+- DEMO_SESSION_TTL_MINUTES=120
+- DEMO_MAX_ACTIVE_SESSIONS_PER_IP=2
+- DEMO_BOOTSTRAP_REQUESTS_PER_IP=3
+- DEMO_BOOTSTRAP_WINDOW_SECONDS=3600
+- DEMO_MAX_UPLOAD_SIZE_BYTES=15728640
+- DEMO_MAX_CHUNK_SIZE_BYTES=2097152
+- DEMO_MAX_STORAGE_BYTES=41943040
+- DEMO_MAX_MEDIA_FILES=4
+- DEMO_MAX_CONCURRENT_JOBS_PER_USER=1
+
+The normal FrameFlux deployment must keep DEMO_ENABLED=false.
 
 ## Frontend
 
-After the API receives its public HTTPS URL, build the FrameFlux frontend with `NEXT_PUBLIC_API_URL=<public API URL>` and `NEXT_PUBLIC_DEMO_ENABLED=true`.
+Once the recruiter API has a verified public HTTPS URL, build the dedicated recruiter frontend with:
 
-The ordinary production frontend should keep `NEXT_PUBLIC_DEMO_ENABLED=false` until the dedicated demo API is verified end-to-end.
+- NEXT_PUBLIC_API_URL=<verified recruiter API URL>
+- NEXT_PUBLIC_DEMO_ENABLED=true
+
+The ordinary production frontend must continue using NEXT_PUBLIC_DEMO_ENABLED=false.
+
+## Verification gate
+
+Deployment preparation is not proof that the demo works.
+
+Before changing the portfolio status from verification-pending, verify from a clean browser/session that:
+
+1. the recruiter workspace can be created without signup,
+2. the seeded synthetic video opens in the real editor,
+3. an actual media-processing job reaches the ARQ worker and FFmpeg,
+4. progress and the processed output are visible,
+5. at least one genuine failure/retry path is tested when supported,
+6. a second recruiter session cannot see the first session's data,
+7. ending the demo revokes access and removes or queues the session data for cleanup,
+8. the normal production account path remains unchanged.
+
+Only the observed deployment URL and runtime behavior should be written into the portfolio after this verification.

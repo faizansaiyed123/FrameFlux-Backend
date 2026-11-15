@@ -1,0 +1,31 @@
+FROM python:3.13-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PORT=8000
+
+WORKDIR /app
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      ffmpeg \
+      supervisor \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
+
+COPY app ./app
+COPY storage ./storage
+COPY alembic.ini ./alembic.ini
+COPY migrations ./migrations
+COPY scripts/start-recruiter-demo.sh ./scripts/start-recruiter-demo.sh
+COPY deploy/supervisord.recruiter-demo.conf /etc/supervisor/supervisord.conf
+
+EXPOSE 8000
+
+CMD ["sh", "scripts/start-recruiter-demo.sh"]
