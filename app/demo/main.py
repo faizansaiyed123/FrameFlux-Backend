@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import io
+import os
 import time
 import wave
 from datetime import datetime, timezone, timedelta
@@ -22,12 +23,19 @@ app = FastAPI(
     description="Standalone in-memory demo backend. Production services are not imported.",
 )
 
+def _demo_allowed_origins() -> list[str]:
+    configured = os.getenv("FRAMEFLUX_DEMO_ALLOWED_ORIGINS", "")
+    origins = [origin.strip().rstrip("/") for origin in configured.split(",") if origin.strip()]
+    if origins:
+        return origins
+    # Local development defaults. A tunnel launcher must set the deployed
+    # frontend origin explicitly instead of opening credentialed CORS broadly.
+    return ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+
 app.add_middleware(
     CORSMiddleware,
-    # Browser fetches use credentials: "include". Reflect approved HTTP(S)
-    # origins so credentialed CORS requests are accepted in demo environments.
-    allow_origins=[],
-    allow_origin_regex=r"https?://[^/]+",
+    allow_origins=_demo_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
