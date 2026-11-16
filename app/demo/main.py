@@ -22,7 +22,10 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    # Browser fetches use credentials: "include". Reflect approved HTTP(S)
+    # origins so credentialed CORS requests are accepted in demo environments.
+    allow_origins=[],
+    allow_origin_regex=r"https?://[^/]+",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -447,6 +450,14 @@ async def demo_api(full_path: str, request: Request):
                 state["media"].insert(0, item)
                 return item
 
+
+    if path.startswith("/media/uploads/") and path.endswith("/progress") and method == "GET":
+        upload_id = parts[2] if len(parts) > 2 else ""
+        resumable = next((r for r in state["resumables"] if r["upload_id"] == upload_id), None)
+        if resumable:
+            return {"upload_id": upload_id, "progress": resumable["progress"], "status": resumable["status"]}
+        return {"upload_id": upload_id, "progress": 100, "status": "completed"}
+
     if len(parts) >= 2 and parts[0] == "media":
         media_id = parts[1]
         media = _media(state, media_id)
@@ -512,10 +523,6 @@ async def demo_api(full_path: str, request: Request):
             if version and method == "DELETE":
                 state["versions"] = [v for v in state["versions"] if v["id"] != version_id]
                 return Response(status_code=204)
-
-    if path.startswith("/media/uploads/") and path.endswith("/progress") and method == "GET":
-        upload_id = parts[2]
-        return {"upload_id": upload_id, "progress": 100, "status": "completed"}
 
     if path == "/jobs" and method == "GET":
         return [_job_public(job) for job in state["jobs"]]
