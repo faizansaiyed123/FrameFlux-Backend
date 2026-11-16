@@ -329,6 +329,16 @@ async def demo_api(full_path: str, request: Request):
         if parts[2:] == ["history"] and method == "GET":
             return state["history"].get(project_id, [])
 
+
+    if path == "/media/batch-download" and method == "POST":
+        body = await _read_json(request)
+        ids = body.get("media_ids") or []
+        selected = [m for m in state["media"] if m["id"] in ids]
+        return {
+            "jobs": [{"media_id": m["id"], "original_filename": m["original_filename"], "file_size": m["file_size"]} for m in selected],
+            "total": len(selected),
+        }
+
     if path == "/media" and method == "GET":
         result = list(state["media"])
         search = query.get("search", "").lower()
@@ -676,6 +686,16 @@ async def demo_api(full_path: str, request: Request):
         media = _media(state, media_id) if media_id else None
         payload, mime = _placeholder_bytes(media, "preview")
         return Response(payload, media_type=mime)
+
+
+    if path == "/subtitles/upload" and method == "POST":
+        form = await _read_form(request)
+        uploaded = form.get("file")
+        return {
+            "id": _new_id("subtitle"),
+            "filename": getattr(uploaded, "filename", None) or "captions.srt",
+            "status": "uploaded",
+        }
 
     if path.startswith("/subtitles/") or path.startswith("/video/") or path.startswith("/audio/") or path.startswith("/images/") or path.startswith("/export/") or path.startswith("/metadata/") or path.startswith("/comparisons/"):
         if method == "GET":
