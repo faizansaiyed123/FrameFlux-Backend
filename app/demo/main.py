@@ -115,6 +115,24 @@ def _queue_job(state: dict, media_id: str | None, operation: str, project_id: st
     if media_id:
         media = _media(state, media_id)
         if media:
+            if operation not in {"process", "batch", "batch-upload", "workflow"}:
+                previous_versions = [
+                    item for item in state["versions"] if item.get("media_id") == media_id
+                ]
+                version_fields = (
+                    "original_filename", "stored_filename", "media_type", "mime_type",
+                    "file_size", "duration", "width", "height", "video_codec",
+                    "audio_codec", "fps", "processing_status", "processing_error",
+                )
+                snapshot = {key: media.get(key) for key in version_fields}
+                state["versions"].append({
+                    "id": _new_id("demo-version"),
+                    "media_id": media_id,
+                    "version_number": len(previous_versions) + 1,
+                    "label": f"Before {operation}",
+                    **snapshot,
+                    "created_at": _now(),
+                })
             media["processing_status"] = "processing"
             media["processing_error"] = None
     return job
@@ -487,8 +505,26 @@ async def demo_api(full_path: str, request: Request):
         upload_id = parts[2] if len(parts) > 2 else ""
         resumable = next((r for r in state["resumables"] if r["upload_id"] == upload_id), None)
         if resumable:
-            return {"upload_id": upload_id, "progress": resumable["progress"], "status": resumable["status"]}
-        return {"upload_id": upload_id, "progress": 100, "status": "completed"}
+            return {
+                "upload_id": upload_id,
+                "user_id": state["user"]["id"],
+                "filename": resumable["filename"],
+                "status": resumable["status"],
+                "progress": resumable["progress"],
+                "total_size": str(resumable["total_size"]),
+                "uploaded_size": str(resumable["uploaded_size"]),
+                "error": None,
+            }
+        return {
+            "upload_id": upload_id,
+            "user_id": state["user"]["id"],
+            "filename": "",
+            "status": "completed",
+            "progress": 100,
+            "total_size": "0",
+            "uploaded_size": "0",
+            "error": None,
+        }
 
     if len(parts) >= 2 and parts[0] == "media":
         media_id = parts[1]
@@ -506,13 +542,21 @@ async def demo_api(full_path: str, request: Request):
         if action in {"download", "processed"} and method == "GET":
             payload, mime = _placeholder_bytes(media, "download")
             return Response(payload, media_type=mime)
-        if action == "status" and method == "GET":
-            job = next((j for j in state["jobs"] if j.get("media_id") == media_id and j["status"] in {"queued", "processing"}), None)
-            return {"media_id": media_id, "status": media["processing_status"], "progress": job["progress"] if job else (100 if media["processing_status"] == "completed" else 0),
-                    "error": media.get("processing_error"), "processed_filename": media.get("processed_filename")}
-        if action == "progress" and method == "GET":
-            job = next((j for j in state["jobs"] if j.get("media_id") == media_id and j["status"] in {"queued", "processing"}), None)
-            return {"media_id": media_id, "status": media["processing_status"], "progress": job["progress"] if job else 100}
+        if action in {"status", "progress"} and method == "GET":
+            job = next((j for j in state["jobs"] if j.get("media_id") == media_id), None)
+            progress = (
+                job.get("progress", 0) if job and job["status"] in {"queued", "processing"}
+                else 100 if media["processing_status"] == "completed" else 0
+            )
+            return {
+                "media_id": media_id,
+                "status": media["processing_status"],
+                "progress": progress,
+                "stage": job.get("stage") if job else None,
+                "job_id": job.get("job_id") if job else None,
+                "processed_filename": media.get("processed_filename"),
+                "error": media.get("processing_error"),
+            }
         if action == "process" and method == "POST":
             job = _queue_job(state, media_id, "process")
             return {"media_id": media_id, "status": "queued", "job_id": job["job_id"]}
