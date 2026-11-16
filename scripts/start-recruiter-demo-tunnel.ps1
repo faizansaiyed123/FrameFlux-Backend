@@ -30,6 +30,29 @@ if (
 
 $frontendOriginValue = $frontendUri.GetLeftPart([System.UriPartial]::Authority).TrimEnd("/")
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$gitCommand = Get-Command git -ErrorAction SilentlyContinue
+if (-not $gitCommand) {
+    Write-Host "Git was not found on PATH. Clone the repository and install Git before starting the demo." -ForegroundColor Red
+    exit 1
+}
+$currentBranch = (& $gitCommand.Source -C $repoRoot branch --show-current).Trim()
+if ($LASTEXITCODE -ne 0 -or $currentBranch -ne "demo") {
+    Write-Host "Safety stop: this launcher only runs from the Backend demo branch. Current branch: $currentBranch" -ForegroundColor Red
+    exit 1
+}
+
+$pythonVersionText = & $pythonCommand.Source --version 2>&1
+if ($pythonVersionText -notmatch "Python\s+(\d+)\.(\d+)") {
+    Write-Host "Could not read the installed Python version." -ForegroundColor Red
+    exit 1
+}
+$pythonMajor = [int]$Matches[1]
+$pythonMinor = [int]$Matches[2]
+if ($pythonMajor -lt 3 -or ($pythonMajor -eq 3 -and $pythonMinor -lt 10)) {
+    Write-Host "Python 3.10 or newer is required. Found: $pythonVersionText" -ForegroundColor Red
+    exit 1
+}
+
 $cloudflaredCommand = Get-Command cloudflared -ErrorAction SilentlyContinue
 if (-not $cloudflaredCommand) {
     Write-Host "cloudflared is not installed. Install it with: winget install --id Cloudflare.cloudflared --exact" -ForegroundColor Red
