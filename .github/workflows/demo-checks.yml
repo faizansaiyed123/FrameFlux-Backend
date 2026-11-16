@@ -17,4 +17,4 @@ jobs:
       - name: Install demo runtime dependencies
         run: python -m pip install --upgrade pip && pip install fastapi "uvicorn[standard]" "httpx>=0.28.1" pytest pydantic python-multipart
       - name: Run standalone demo tests
-        run: pytest -q demo_tests/test_demo_api.py
+        run: python -m pytest -q demo_tests/test_demo_api.py
