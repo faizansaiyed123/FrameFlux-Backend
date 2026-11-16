@@ -145,15 +145,7 @@ try {
     Write-Host "The API stores temporary in-memory demo state; do not upload private media." -ForegroundColor Yellow
 
     $tunnelArgs = @("tunnel", "--no-autoupdate", "--url", "http://127.0.0.1:$Port")
-    $validEmails = @($AllowedEmails | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-    if ($validEmails.Count -gt 0) {
-        $tunnelArgs += @("--allowed-mail", ($validEmails -join ","))
-        Write-Host "Cloudflare email access is enabled for: $($validEmails -join ', ')"
-    } else {
-        Write-Host "WARNING: anyone who obtains the temporary tunnel URL can reach this demo API." -ForegroundColor Yellow
-        Write-Host "For recruiter-specific protection, pass -AllowedEmails recruiter@example.com,another@example.com"
-    }
-
+    Write-Host "WARNING: anyone who obtains the temporary tunnel URL can reach this demo API." -ForegroundColor Yellow
     & $cloudflaredCommand.Source @tunnelArgs
 } finally {
     if ($apiProcess -and -not $apiProcess.HasExited) {
