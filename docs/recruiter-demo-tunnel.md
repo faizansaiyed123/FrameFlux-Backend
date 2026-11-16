@@ -27,7 +27,7 @@ Cloudflare Quick Tunnels do not require a Cloudflare account or custom domain. T
 
 From the root of your local clone of FrameFlux-Backend, make sure you have checked out the demo branch, pulled its latest changes, and run:
 
-    .\scripts\start-recruiter-demo-tunnel.ps1 -FrontendOrigin "https://YOUR-FRONTEND-DEMO-HOST"
+    .\scripts\start-recruiter-demo-tunnel.ps1 -FrontendOrigin "https://frame-flux-demo-git-demo-focus-journals-projects.vercel.app"
 
 Use only the frontend demo site's origin: include https://, but no route or trailing path. The script creates .venv if needed, installs only the standalone demo API dependencies, starts Uvicorn on loopback, checks its health, and then launches cloudflared.
 
@@ -41,13 +41,13 @@ Keep the PowerShell window open while recruiters use the demo. Press Ctrl+C in t
 
 Copy the random tunnel URL and URL-encode it. Then open:
 
-    https://YOUR-FRONTEND-DEMO-HOST/?demoBackend=https%3A%2F%2Frandom-words.trycloudflare.com
+    https://frame-flux-demo-git-demo-focus-journals-projects.vercel.app/?demoBackend=https%3A%2F%2Frandom-words.trycloudflare.com
 
 The frontend demo branch recognizes the demoBackend query parameter, stores the URL for the current browser tab session, and removes the parameter from the address bar. You can share that complete link with a recruiter. The frontend validates that query-supplied backend URLs use HTTPS and the trycloudflare.com hostname.
 
 When the tunnel URL changes, create a new frontend link using the new URL. To switch the current tab back to browser-only simulation, open:
 
-    https://YOUR-FRONTEND-DEMO-HOST/?demoBackend=local
+    https://frame-flux-demo-git-demo-focus-journals-projects.vercel.app/?demoBackend=local
 
 If the tunnel is offline or unreachable, the frontend falls back to its browser-local simulation. That fallback is intentional; do not mistake it for a successful connection to the backend. The tunnel URL must be active before a recruiter opens the linked frontend.
 
