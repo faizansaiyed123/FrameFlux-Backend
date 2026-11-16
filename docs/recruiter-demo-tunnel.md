@@ -37,14 +37,6 @@ The terminal prints a random URL similar to:
 
 Keep the PowerShell window open while recruiters use the demo. Press Ctrl+C in that window to stop the tunnel and API.
 
-### Optional: restrict tunnel access to known recruiter email addresses
-
-The default quick tunnel is accessible to anyone who obtains its random URL. To require email verification, pass one or more approved email addresses:
-
-    .\scripts\start-recruiter-demo-tunnel.ps1 -FrontendOrigin "https://YOUR-FRONTEND-DEMO-HOST" -AllowedEmails "recruiter@example.com","another@example.com"
-
-Cloudflare sends each allowed visitor a one-time PIN. Use this when you know the recruiter's email address; otherwise the email gate will prevent them from opening the demo.
-
 ## Connect the hosted frontend
 
 Copy the random tunnel URL and URL-encode it. Then open:
