@@ -425,18 +425,39 @@ async def demo_api(full_path: str, request: Request):
         if resumable:
             if len(parts) >= 4 and parts[3] == "chunk" and method == "POST":
                 chunk_index = int(parts[4]) if len(parts) > 4 else 0
-                chunk_size = int(query.get("chunk_size", "1"))
-                resumable["uploaded_size"] = min(resumable["total_size"], resumable["uploaded_size"] + max(chunk_size, 1))
-                resumable["progress"] = round((resumable["uploaded_size"] / resumable["total_size"]) * 100) if resumable["total_size"] else 100
-                return {"upload_id": upload_id, "index": chunk_index, "status": "uploaded", "progress": resumable["progress"]}
+                form = await _read_form(request)
+                chunk_file = form.get("file")
+                try:
+                    chunk_data = await chunk_file.read()
+                    chunk_size = len(chunk_data)
+                except Exception:
+                    chunk_size = 0
+                resumable["uploaded_size"] = min(
+                    resumable["total_size"],
+                    resumable["uploaded_size"] + chunk_size,
+                )
+                resumable["progress"] = (
+                    round((resumable["uploaded_size"] / resumable["total_size"]) * 100)
+                    if resumable["total_size"] else 100
+                )
+                return {
+                    "detail": "Chunk accepted by demo backend.",
+                    "upload_id": upload_id,
+                    "index": chunk_index,
+                    "status": "uploaded",
+                    "progress": resumable["progress"],
+                }
             if len(parts) == 4 and parts[3] == "pause" and method == "POST":
-                resumable["status"] = "paused"; return {"status": "paused"}
+                resumable["status"] = "paused"
+                return {"detail": "Upload paused in demo.", "status": "paused"}
             if len(parts) == 4 and parts[3] == "resume" and method == "POST":
-                resumable["status"] = "active"; return {"status": "active"}
+                resumable["status"] = "active"
+                return {"detail": "Upload resumed in demo.", "status": "active"}
             if len(parts) == 4 and parts[3] == "retry" and method == "POST":
-                return {"status": "retrying", "index": query.get("index")}
+                return {"detail": "Chunk retry accepted by demo backend.", "status": "retrying", "index": query.get("index")}
             if len(parts) == 3 and method == "DELETE":
-                resumable["status"] = "cancelled"; return {"status": "cancelled"}
+                resumable["status"] = "cancelled"
+                return {"detail": "Resumable upload cancelled.", "status": "cancelled"}
             if len(parts) == 4 and parts[3] == "finalize" and method == "POST":
                 resumable["status"] = "completed"; resumable["progress"] = 100
                 item = {
