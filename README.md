@@ -486,3 +486,8 @@ Run the ARQ worker separately when developing without Docker:
 ```bash
 uv run arq app.infrastructure.worker.WorkerSettings
 ```
+
+
+## Recruiter demo without a hosted backend
+
+The isolated recruiter API on the `demo` branch can run on a developer's Windows computer and be exposed temporarily through Cloudflare Quick Tunnel. It does not start or change the production API, and it does not require deploying this backend repository. See the [recruiter demo tunnel guide](docs/recruiter-demo-tunnel.md) for the branch-checked launcher, CORS configuration, connection URL, and limitations.
