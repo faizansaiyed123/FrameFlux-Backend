@@ -67,3 +67,56 @@ def test_reset_restores_seed():
     reset = client.post("/demo/reset")
     assert reset.status_code == 200
     assert len(client.get("/projects").json()) == 3
+
+
+def test_browser_cors_accepts_credentialed_frontend_origin():
+    response = client.options(
+        "/dashboard/overview",
+        headers={
+            "Origin": "http://127.0.0.1:3000",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:3000"
+    assert response.headers["access-control-allow-credentials"] == "true"
+
+
+def test_frontend_binary_and_collection_response_shapes():
+    thumbnail = client.get("/thumbnails/demo-media-001")
+    assert thumbnail.status_code == 200
+    assert thumbnail.headers["content-type"].startswith("image/svg+xml")
+
+    audio = client.get("/audio/demo-media-003/extract")
+    assert audio.status_code == 200
+    assert audio.headers["content-type"].startswith("audio/wav")
+    assert audio.content[:4] == b"RIFF"
+
+    subtitle_tracks = client.get("/subtitles/demo-media-001/tracks")
+    assert subtitle_tracks.status_code == 200
+    assert subtitle_tracks.json() == []
+
+    media_info = client.get("/media-info/demo-media-001")
+    assert media_info.status_code == 200
+    assert media_info.json()["file_name"] == "product-launch-master.mp4"
+
+
+def test_resumable_upload_progress_uses_uploaded_chunk_bytes():
+    initialized = client.post(
+        "/media/resumable/init",
+        json={"original_filename": "large-upload.mp4", "total_size": 10, "chunk_size": 4},
+    )
+    assert initialized.status_code == 200
+    upload_id = initialized.json()["upload_id"]
+
+    chunk = client.post(
+        f"/media/resumable/{upload_id}/chunk/0",
+        files={"file": ("chunk.bin", b"1234", "application/octet-stream")},
+    )
+    assert chunk.status_code == 200
+    assert chunk.json()["detail"]
+
+    progress = client.get(f"/media/uploads/{upload_id}/progress")
+    assert progress.status_code == 200
+    assert progress.json()["progress"] == 40
