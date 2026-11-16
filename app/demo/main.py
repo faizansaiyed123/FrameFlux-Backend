@@ -753,20 +753,85 @@ async def demo_api(full_path: str, request: Request):
             "status": "uploaded",
         }
 
-    if path.startswith("/subtitles/") or path.startswith("/video/") or path.startswith("/audio/") or path.startswith("/images/") or path.startswith("/export/") or path.startswith("/metadata/") or path.startswith("/comparisons/"):
-        if method == "GET":
-            media_id = next((p for p in reversed(parts) if _media(state, p)), None)
-            media = _media(state, media_id) if media_id else None
-            payload, mime = _placeholder_bytes(media, "demo response")
-            if path.startswith("/subtitles/"):
-                return {"media_id": media_id, "tracks": [], "status": "completed"} if path.endswith("/tracks") else {"status": "completed"}
-            if path.startswith("/comparisons/"):
-                return {"media_a": parts[-2], "media_b": parts[-1], "differences": [], "status": "ready"}
+    if path.startswith("/comparisons/") and method == "GET":
+        media_a = _media(state, parts[1]) if len(parts) > 1 else None
+        media_b = _media(state, parts[2]) if len(parts) > 2 else None
+        if media_a is None or media_b is None:
+            return JSONResponse({"detail": "Media not found"}, status_code=404)
+        return {
+            "media_a_id": media_a["id"],
+            "media_b_id": media_b["id"],
+            "size_diff": int(media_a.get("file_size") or 0) - int(media_b.get("file_size") or 0),
+            "duration_diff": (media_a.get("duration") or 0) - (media_b.get("duration") or 0)
+                if media_a.get("duration") is not None and media_b.get("duration") is not None else None,
+            "resolution_match": (media_a.get("width"), media_a.get("height")) == (media_b.get("width"), media_b.get("height")),
+            "video_codec_match": media_a.get("video_codec") == media_b.get("video_codec"),
+            "audio_codec_match": media_a.get("audio_codec") == media_b.get("audio_codec"),
+            "storage_saved": max(0, int(media_a.get("file_size") or 0) - int(media_b.get("file_size") or 0)),
+        }
+
+    if path.startswith("/subtitles/"):
+        media_id = parts[1] if len(parts) > 1 else ""
+        media = _media(state, media_id)
+        if path.endswith("/tracks") and method == "GET":
+            return []
+        if path.endswith("/sync") and method == "POST":
+            body = await _read_json(request)
+            if body.get("preview"):
+                return {"preview_url": f"/preview/{media_id}/video", "offset": body.get("offset_seconds", 0), "scale": body.get("scale", 1)}
+            return Response(b"WEBVTT\\n\\n00:00:00.000 --> 00:00:01.000\\nFrameFlux demo subtitle\\n", media_type="text/vtt")
+        if path.endswith("/mux") and method == "POST":
+            payload, mime = _placeholder_bytes(media, "subtitle mux")
             return Response(payload, media_type=mime)
+        if path.endswith("/edit") and method == "POST":
+            return Response(b"WEBVTT\\n\\n00:00:00.000 --> 00:00:01.000\\nEdited demo subtitle\\n", media_type="text/vtt")
+        if path.endswith("/burn") and method == "POST":
+            return {"media_id": media_id, "operation": "burn-subtitles", "output_filename": f"{media_id}-subtitled-demo.mp4", "status": "completed"}
+        if method == "GET":
+            return {"status": "completed"}
+        return {"status": "completed", "media_id": media_id}
+
+    if path.startswith("/audio/"):
+        media_id = parts[1] if len(parts) > 1 else ""
+        media = _media(state, media_id)
+        action = parts[2] if len(parts) > 2 else ""
+        if action == "extract" and method == "GET":
+            payload, mime = _placeholder_bytes({"media_type": "audio", "original_filename": "extracted-audio.wav"}, "extracted audio")
+            return Response(payload, media_type=mime)
+        if action == "convert" and method == "POST":
+            payload, mime = _placeholder_bytes({"media_type": "audio", "original_filename": "converted-audio.wav"}, "converted audio")
+            return Response(payload, media_type=mime)
+        if action == "to-video" and method == "POST":
+            payload, mime = _placeholder_bytes(None, "audio visualizer")
+            return Response(payload, media_type=mime)
+        if media and method == "POST":
+            operation = action or "audio"
+            return {
+                "media_id": media_id,
+                "operation": operation,
+                "output_filename": f"{media['original_filename']}-{operation}-demo",
+                "status": "completed",
+            }
+        if media and method == "GET":
+            payload, mime = _placeholder_bytes(media, "audio preview")
+            return Response(payload, media_type=mime)
+
+    if path.startswith("/video/") or path.startswith("/images/") or path.startswith("/export/") or path.startswith("/metadata/"):
         media_id = next((p for p in reversed(parts) if _media(state, p)), None)
+        media = _media(state, media_id) if media_id else None
+        if method == "GET":
+            payload, mime = _placeholder_bytes(media, "demo response")
+            return Response(payload, media_type=mime)
         if media_id:
-            job = _queue_job(state, media_id, parts[0], None)
-            return {"media_id": media_id, "status": "queued", "job_id": job["job_id"], "output_filename": f"demo-{parts[0].strip('/')}.mp4"}
+            operation = parts[-1]
+            job = _queue_job(state, media_id, operation, None)
+            return {
+                "media_id": media_id,
+                "status": job["status"],
+                "job_id": job["job_id"],
+                "operation": operation,
+                "output_filename": f"{media['original_filename']}-{operation}-demo",
+            }
         return {"status": "completed"}
 
     if path == "/demo/runtime" and method == "GET":
