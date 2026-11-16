@@ -561,10 +561,6 @@ async def demo_api(full_path: str, request: Request):
             job = _queue_job(state, media_id, "process")
             return {"media_id": media_id, "status": "queued", "job_id": job["job_id"]}
 
-        if action in {"extract", "convert", "to-video"} and method == "POST":
-            payload, mime = _placeholder_bytes(media, "audio")
-            return Response(payload, media_type=mime)
-
         if action in {"compress", "convert", "edit", "merge", "transform", "freeze", "overlay"} and method == "POST":
             body = await _read_json(request)
             operation = action
