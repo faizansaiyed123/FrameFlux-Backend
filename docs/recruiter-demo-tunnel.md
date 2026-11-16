@@ -55,6 +55,7 @@ If the tunnel is offline or unreachable, the frontend falls back to its browser-
 
 - A Quick Tunnel is temporary, intended for testing, and has no uptime guarantee. The random public URL stops working after the tunnel process stops.
 - Anyone who obtains the random URL can call the demo API. Treat the URL like a temporary access link, share it only with intended testers, and stop the tunnel after the session. CORS limits browser origins; it is not API authentication.
+- Do not add Cloudflare's `--allowed-mail` gate to this API tunnel without redesigning and testing the browser authentication flow. The frontend sends credentialed, preflighted cross-origin API requests; Cloudflare Access requires a valid authorization cookie, and its documentation states that protected preflight `OPTIONS` requests are blocked unless separately bypassed/configured. The Quick Tunnel launcher does not configure that bypass.
 - The backend currently uses one in-memory demo workspace shared by requests reaching that running process. Do not run concurrent recruiter sessions against the same tunnel if they need isolated data.
 - Do not upload confidential or personal media. The API is a simulation and does not provide production storage or actual transcoding.
 - The API binds to 127.0.0.1, not 0.0.0.0; the tunnel is the only intended remote entry point.
