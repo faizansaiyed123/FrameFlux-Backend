@@ -83,6 +83,18 @@ def test_browser_cors_accepts_credentialed_frontend_origin():
     assert response.headers["access-control-allow-credentials"] == "true"
 
 
+def test_browser_cors_rejects_unconfigured_origin():
+    response = client.options(
+        "/dashboard/overview",
+        headers={
+            "Origin": "https://untrusted.example",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.status_code == 400
+    assert "access-control-allow-origin" not in response.headers
+
+
 def test_frontend_binary_and_collection_response_shapes():
     thumbnail = client.get("/thumbnails/demo-media-001")
     assert thumbnail.status_code == 200
