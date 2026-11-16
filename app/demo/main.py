@@ -613,13 +613,69 @@ async def demo_api(full_path: str, request: Request):
             return _job_public(job)
         return JSONResponse({"detail": "Job not found"}, status_code=404)
 
-    if path == "/batch" or path.startswith("/batch/"):
-        if method == "POST":
-            job = _queue_job(state, None, "batch")
-            return {"job_id": job["job_id"], "status": "queued"}
-        if len(parts) >= 3 and parts[2] == "status":
-            job = next((j for j in state["jobs"] if j["job_id"] == parts[1]), None)
-            return _job_public(job) if job else {"job_id": parts[1], "status": "completed", "progress": 100}
+    if path == "/batch/upload" and method == "POST":
+        body = await _read_json(request)
+        filenames = body.get("files") or []
+        job = _queue_job(state, None, "batch-upload")
+        job["batch_total_files"] = len(filenames)
+        job["batch_filenames"] = [str(name) for name in filenames]
+        return {
+            "job_id": job["job_id"],
+            "total_files": len(filenames),
+            "status": "queued",
+        }
+
+    if path == "/batch/process" and method == "POST":
+        body = await _read_json(request)
+        media_ids = body.get("media_ids") or []
+        operation = str(body.get("operation") or "process")
+        selected = [m for m in state["media"] if m["id"] in media_ids]
+        job = _queue_job(state, None, operation)
+        job["batch_media_ids"] = [m["id"] for m in selected]
+        job["batch_total_items"] = len(selected)
+        job["batch_operation"] = operation
+        return {
+            "job_id": job["job_id"],
+            "total_items": len(selected),
+            "operation": operation,
+            "status": "queued",
+            "results": [
+                {"media_id": m["id"], "filename": m["original_filename"]}
+                for m in selected
+            ],
+        }
+
+    if len(parts) == 3 and parts[0] == "batch" and parts[2] == "status" and method == "GET":
+        job = next((j for j in state["jobs"] if j["job_id"] == parts[1]), None)
+        if job is None:
+            return JSONResponse({"detail": "Batch job not found"}, status_code=404)
+        media_ids = job.get("batch_media_ids", [])
+        selected = [m for m in state["media"] if m["id"] in media_ids]
+        completed = len(selected) if job["status"] == "completed" else 0
+        failed = len(selected) if job["status"] == "failed" else 0
+        results = []
+        for media in selected:
+            item_status = "completed" if job["status"] == "completed" else job["status"]
+            results.append({
+                "media_id": media["id"],
+                "filename": media["original_filename"],
+                "status": item_status,
+                "progress": 100 if item_status == "completed" else job["progress"],
+                "output_filename": media.get("processed_filename") or media["stored_filename"]
+                    if item_status == "completed" else None,
+            })
+        return {
+            "job_id": job["job_id"],
+            "status": job["status"],
+            "total": job.get("batch_total_items", job.get("batch_total_files", 0)),
+            "completed": completed,
+            "failed": failed,
+            "results": results,
+        }
+
+    if path == "/batch" and method == "POST":
+        job = _queue_job(state, None, "batch")
+        return {"job_id": job["job_id"], "status": job["status"]}
 
     if path == "/presets" and method == "GET":
         return state["presets"]
@@ -646,20 +702,49 @@ async def demo_api(full_path: str, request: Request):
         return [workflow for group in state["workflows"].values() for workflow in group]
     if path == "/workflows" and method == "POST":
         body = await _read_json(request)
-        workflow = {"id": _new_id("workflow"), "user_id": state["user"]["id"], "name": body.get("name", "Demo workflow"),
-                    "description": body.get("description"), "is_builtin": False, "operations": body.get("operations", []),
-                    "created_at": _now(), "updated_at": _now()}
+        workflow = {
+            "id": _new_id("workflow"),
+            "user_id": state["user"]["id"],
+            "name": body.get("name", "Demo workflow"),
+            "description": body.get("description"),
+            "is_builtin": False,
+            "operations": body.get("operations", []),
+            "created_at": _now(),
+            "updated_at": _now(),
+        }
         state["workflows"].setdefault("", []).append(workflow)
         return workflow
     if len(parts) == 2 and parts[0] == "workflows":
         wf = next((w for group in state["workflows"].values() for w in group if w["id"] == parts[1]), None)
-        if method == "GET": return wf or JSONResponse({"detail": "Workflow not found"}, status_code=404)
-        if method == "DELETE": 
-            for project_id, group in state["workflows"].items(): state["workflows"][project_id] = [w for w in group if w["id"] != parts[1]]
+        if wf is None:
+            return JSONResponse({"detail": "Workflow not found"}, status_code=404)
+        if method == "GET":
+            return wf
+        if method in {"PATCH", "PUT"}:
+            body = await _read_json(request)
+            for key in ("name", "description", "operations"):
+                if key in body:
+                    wf[key] = body[key]
+            wf["updated_at"] = _now()
+            return wf
+        if method == "DELETE":
+            for project_id, group in state["workflows"].items():
+                state["workflows"][project_id] = [w for w in group if w["id"] != parts[1]]
             return Response(status_code=204)
     if len(parts) == 3 and parts[0] == "workflows" and parts[2] == "run" and method == "POST":
-        job = _queue_job(state, query.get("media_id"), "workflow")
-        return {"status": "queued", "job_id": job["job_id"]}
+        workflow = next((w for group in state["workflows"].values() for w in group if w["id"] == parts[1]), None)
+        if workflow is None:
+            return JSONResponse({"detail": "Workflow not found"}, status_code=404)
+        media_id = query.get("media_id")
+        if media_id and _media(state, media_id) is None:
+            return JSONResponse({"detail": "Media not found"}, status_code=404)
+        job = _queue_job(state, media_id, "workflow")
+        return {
+            "workflow_id": workflow["id"],
+            "media_id": media_id,
+            "operations_count": len(workflow.get("operations") or []),
+            "status": job["status"],
+        }
 
     if path == "/storage/usage" and method == "GET":
         return {"total_size": sum(int(m.get("file_size") or 0) for m in state["media"]), "total_files": len(state["media"]), "user_id": state["user"]["id"]}
