@@ -546,10 +546,15 @@ async def demo_api(full_path: str, request: Request):
             return [v for v in state["versions"] if v["media_id"] == media_id]
         if action.startswith("versions/"):
             version_id = parts[3]
-            version = next((v for v in state["versions"] if v["id"] == version_id), None)
+            version = next((v for v in state["versions"] if v["id"] == version_id and v["media_id"] == media_id), None)
+            if action.endswith("/download") and method == "GET":
+                if version is None:
+                    return JSONResponse({"detail": "Media version not found"}, status_code=404)
+                payload, mime = _placeholder_bytes(version, "version download")
+                return Response(payload, media_type=mime)
             if action.endswith("/restore") and method == "POST" and version:
                 media.update({k: version[k] for k in ("original_filename", "stored_filename", "file_size", "mime_type", "duration", "width", "height", "video_codec", "audio_codec", "fps") if k in version})
-                return {"status": "restored", "media_id": media_id, "version_id": version_id}
+                return media
             if version and method == "GET":
                 return version
             if version and method == "DELETE":
@@ -714,16 +719,23 @@ async def demo_api(full_path: str, request: Request):
     if path.startswith("/media-info/") and method == "GET":
         media = _media(state, parts[1])
         if media:
-            return {"media_id": media["id"], "filename": media["original_filename"], "mime_type": media["mime_type"],
+            return {"media_id": media["id"], "file_name": media["original_filename"], "filename": media["original_filename"], "mime_type": media["mime_type"],
                     "file_size": media["file_size"], "duration": media["duration"], "width": media["width"], "height": media["height"],
                     "video_codec": media["video_codec"], "audio_codec": media["audio_codec"], "fps": media["fps"]}
         return JSONResponse({"detail": "Media not found"}, status_code=404)
 
     if path.startswith("/thumbnails/") and method in {"GET", "POST"}:
         media = _media(state, parts[1])
-        if path.endswith("/set") or path.endswith("/crop") or path.endswith("/select"):
-            return {"media_id": parts[1], "status": "completed", "thumbnail_url": f"/demo/thumbnails/{parts[1]}.svg"}
-        return {"media_id": parts[1], "thumbnail_url": f"/demo/thumbnails/{parts[1]}.svg"}
+        if media is None:
+            return JSONResponse({"detail": "Media not found"}, status_code=404)
+        if path.endswith("/set") and method == "GET":
+            return {"thumbnails": [f"/demo/thumbnails/{parts[1]}/0.svg", f"/demo/thumbnails/{parts[1]}/1.svg"]}
+        if path.endswith("/crop") and method == "POST":
+            return {"path": f"/demo/thumbnails/{parts[1]}/cropped.svg"}
+        if path.endswith("/select") and method == "POST":
+            return {"selected": f"/demo/thumbnails/{parts[1]}/selected.svg"}
+        payload, mime = _placeholder_bytes(media, "thumbnail")
+        return Response(payload, media_type=mime)
 
     if path.startswith("/preview/") or path.startswith("/gif/"):
         media_id = parts[1] if len(parts) > 1 else None
