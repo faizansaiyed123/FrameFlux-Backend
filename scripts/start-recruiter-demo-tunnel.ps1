@@ -2,9 +2,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$FrontendOrigin,
 
-    [int]$Port = 8000,
-
-    [string[]]$AllowedEmails = @()
+    [int]$Port = 8000
 )
 
 $ErrorActionPreference = "Stop"
@@ -85,14 +83,18 @@ if ($LASTEXITCODE -ne 0) {
 
 # Refuse to take over an existing service on the selected port.
 $portProbe = [System.Net.Sockets.TcpClient]::new()
+$portInUse = $false
 try {
     $portProbe.Connect("127.0.0.1", $Port)
-    Write-Host "Port $Port is already accepting connections. Stop that service or choose another port with -Port." -ForegroundColor Red
-    exit 1
+    $portInUse = $true
 } catch {
-    if ($portProbe.Connected) { throw }
+    $portInUse = $false
 } finally {
     $portProbe.Dispose()
+}
+if ($portInUse) {
+    Write-Host "Port $Port is already accepting connections. Stop that service or choose another port with -Port." -ForegroundColor Red
+    exit 1
 }
 
 $previousAllowedOrigins = $env:FRAMEFLUX_DEMO_ALLOWED_ORIGINS
@@ -146,8 +148,47 @@ try {
 
     $tunnelArgs = @("tunnel", "--no-autoupdate", "--url", "http://127.0.0.1:$Port")
     Write-Host "WARNING: anyone who obtains the temporary tunnel URL can reach this demo API." -ForegroundColor Yellow
-    & $cloudflaredCommand.Source @tunnelArgs
+
+    $tunnelStdout = Join-Path $logDirectory "tunnel.stdout.log"
+    $tunnelStderr = Join-Path $logDirectory "tunnel.stderr.log"
+    Remove-Item $tunnelStdout, $tunnelStderr -Force -ErrorAction SilentlyContinue
+    $tunnelProcess = Start-Process -FilePath $cloudflaredCommand.Source -ArgumentList $tunnelArgs -WorkingDirectory $repoRoot -WindowStyle Hidden -RedirectStandardOutput $tunnelStdout -RedirectStandardError $tunnelStderr -PassThru
+    $stdoutLinesRead = 0
+    $stderrLinesRead = 0
+    $frontendLinkPrinted = $false
+
+    while (-not $tunnelProcess.HasExited) {
+        foreach ($stream in @(
+            @{ Path = $tunnelStdout; Read = [ref]$stdoutLinesRead },
+            @{ Path = $tunnelStderr; Read = [ref]$stderrLinesRead }
+        )) {
+            if (-not (Test-Path $stream.Path)) { continue }
+            $lines = @(Get-Content $stream.Path -ErrorAction SilentlyContinue)
+            for ($lineIndex = $stream.Read.Value; $lineIndex -lt $lines.Count; $lineIndex++) {
+                $line = $lines[$lineIndex]
+                if ($line) { Write-Host $line }
+                if (-not $frontendLinkPrinted -and $line -match "https://[a-zA-Z0-9-]+\.trycloudflare\.com") {
+                    $tunnelUrl = $Matches[0].TrimEnd(".")
+                    $encodedTunnelUrl = [System.Uri]::EscapeDataString($tunnelUrl)
+                    Write-Host ""
+                    Write-Host "Frontend recruiter link:" -ForegroundColor Green
+                    Write-Host "$frontendOriginValue/?demoBackend=$encodedTunnelUrl" -ForegroundColor Cyan
+                    Write-Host ""
+                    $frontendLinkPrinted = $true
+                }
+            }
+            $stream.Read.Value = $lines.Count
+        }
+        Start-Sleep -Milliseconds 500
+    }
+
+    if ($tunnelProcess.ExitCode -ne 0) {
+        throw "cloudflared exited with code $($tunnelProcess.ExitCode)."
+    }
 } finally {
+    if ($tunnelProcess -and -not $tunnelProcess.HasExited) {
+        Stop-Process -Id $tunnelProcess.Id -Force -ErrorAction SilentlyContinue
+    }
     if ($apiProcess -and -not $apiProcess.HasExited) {
         Write-Host ""
         Write-Host "Stopping the local FrameFlux demo API..."
