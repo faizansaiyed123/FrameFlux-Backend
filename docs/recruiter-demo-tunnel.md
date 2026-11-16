@@ -54,7 +54,7 @@ If the tunnel is offline or unreachable, the frontend falls back to its browser-
 ## Important safety and demo limitations
 
 - A Quick Tunnel is temporary, intended for testing, and has no uptime guarantee. The random public URL stops working after the tunnel process stops.
-- Without -AllowedEmails, anyone who obtains the URL can call the demo API. Share it only with intended testers and stop the tunnel after the session.
+- Anyone who obtains the random URL can call the demo API. Treat the URL like a temporary access link, share it only with intended testers, and stop the tunnel after the session. CORS limits browser origins; it is not API authentication.
 - The backend currently uses one in-memory demo workspace shared by requests reaching that running process. Do not run concurrent recruiter sessions against the same tunnel if they need isolated data.
 - Do not upload confidential or personal media. The API is a simulation and does not provide production storage or actual transcoding.
 - The API binds to 127.0.0.1, not 0.0.0.0; the tunnel is the only intended remote entry point.
