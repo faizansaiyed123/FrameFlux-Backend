@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import io
 import time
+import wave
 from datetime import datetime, timezone, timedelta
 from pathlib import PurePosixPath
 from typing import Any
@@ -165,6 +167,15 @@ def _storage_rows(state: dict, field: str):
 
 
 def _placeholder_bytes(media: dict | None, kind: str = "media") -> tuple[bytes, str]:
+    if media and media.get("media_type") == "audio":
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(8_000)
+            audio.writeframes(b"\\x00\\x00" * 8_000)
+        return buffer.getvalue(), "audio/wav"
+
     name = media["original_filename"] if media else "FrameFlux demo asset"
     svg = (
         "<svg xmlns='http://www.w3.org/2000/svg' width='1280' height='720' viewBox='0 0 1280 720'>"
