@@ -41,18 +41,6 @@ if ($LASTEXITCODE -ne 0 -or $currentBranch -ne "demo") {
     exit 1
 }
 
-$pythonVersionText = & $pythonCommand.Source --version 2>&1
-if ($pythonVersionText -notmatch "Python\s+(\d+)\.(\d+)") {
-    Write-Host "Could not read the installed Python version." -ForegroundColor Red
-    exit 1
-}
-$pythonMajor = [int]$Matches[1]
-$pythonMinor = [int]$Matches[2]
-if ($pythonMajor -lt 3 -or ($pythonMajor -eq 3 -and $pythonMinor -lt 10)) {
-    Write-Host "Python 3.10 or newer is required. Found: $pythonVersionText" -ForegroundColor Red
-    exit 1
-}
-
 $cloudflaredCommand = Get-Command cloudflared -ErrorAction SilentlyContinue
 if (-not $cloudflaredCommand) {
     Write-Host "cloudflared is not installed. Install it with: winget install --id Cloudflare.cloudflared --exact" -ForegroundColor Red
@@ -63,6 +51,18 @@ if (-not $cloudflaredCommand) {
 $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
 if (-not $pythonCommand) {
     Write-Host "Python 3.10 or newer was not found on PATH." -ForegroundColor Red
+    exit 1
+}
+
+$pythonVersionText = & $pythonCommand.Source --version 2>&1
+if ($pythonVersionText -notmatch "Python\s+(\d+)\.(\d+)") {
+    Write-Host "Could not read the installed Python version." -ForegroundColor Red
+    exit 1
+}
+$pythonMajor = [int]$Matches[1]
+$pythonMinor = [int]$Matches[2]
+if ($pythonMajor -lt 3 -or ($pythonMajor -eq 3 -and $pythonMinor -lt 10)) {
+    Write-Host "Python 3.10 or newer is required. Found: $pythonVersionText" -ForegroundColor Red
     exit 1
 }
 
