@@ -120,3 +120,67 @@ def test_resumable_upload_progress_uses_uploaded_chunk_bytes():
     progress = client.get(f"/media/uploads/{upload_id}/progress")
     assert progress.status_code == 200
     assert progress.json()["progress"] == 40
+
+
+def test_batch_process_and_status_match_frontend_contract():
+    response = client.post(
+        "/batch/process",
+        json={"media_ids": ["demo-media-001", "demo-media-005"], "operation": "compress"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total_items"] == 2
+    assert payload["operation"] == "compress"
+    assert len(payload["results"]) == 2
+
+    status = client.get(f"/batch/{payload['job_id']}/status")
+    assert status.status_code == 200
+    body = status.json()
+    assert body["total"] == 2
+    assert len(body["results"]) == 2
+    assert {"media_id", "filename", "status", "progress"} <= set(body["results"][0])
+
+
+def test_workflow_create_update_and_run_match_frontend_contract():
+    created = client.post(
+        "/workflows",
+        json={
+            "name": "Browser Test Workflow",
+            "description": "Created by integration contract test",
+            "operations": [{"type": "convert", "params": {"format": "webm"}}],
+        },
+    )
+    assert created.status_code == 200
+    workflow = created.json()
+
+    updated = client.patch(
+        f"/workflows/{workflow['id']}",
+        json={"name": "Updated Browser Workflow"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "Updated Browser Workflow"
+
+    run = client.post(
+        f"/workflows/{workflow['id']}/run?media_id=demo-media-001",
+    )
+    assert run.status_code == 200
+    assert run.json() == {
+        "workflow_id": workflow["id"],
+        "media_id": "demo-media-001",
+        "operations_count": 1,
+        "status": "processing",
+    }
+
+
+def test_processing_versions_and_media_status_match_frontend_contract():
+    response = client.post("/media/demo-media-001/convert", json={"format": "webm"})
+    assert response.status_code == 200
+
+    status = client.get("/media/demo-media-001/status")
+    assert status.status_code == 200
+    assert {"stage", "job_id", "processed_filename", "error"} <= set(status.json())
+
+    versions = client.get("/media/demo-media-001/versions")
+    assert versions.status_code == 200
+    assert len(versions.json()) == 1
+    assert versions.json()[0]["version_number"] == 1
